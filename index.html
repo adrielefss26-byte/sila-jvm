@@ -6117,7 +6117,8 @@ function _fbInit(configObj) {
     }
     _fbDb = firebase.firestore(_fbApp);
     // Persistência offline (cache local)
-    _fbDb.enablePersistence({ synchronizeTabs: true }).catch(() => {});
+    // persistência removida — evita cache desatualizado entre dispositivos
+    // _fbDb.enablePersistence({ synchronizeTabs: true }).catch(() => {});
     return true;
   } catch(e) {
     console.error('Firebase init error:', e);
@@ -6216,7 +6217,22 @@ function _refreshSyncModal() {
   } catch(e) {}
 }
 
-function openSyncModal()  { _refreshSyncModal(); document.getElementById('syncModal').classList.add('open'); }
+function openSyncModal()  {
+  _refreshSyncModal();
+  document.getElementById('syncModal').classList.add('open');
+  // Sempre força um reload da nuvem ao abrir o modal
+  if (_fbConfigured) {
+    setTimeout(() => {
+      _fbDocRef().get({ source: 'server' }).then(snap => {
+        if (!snap.exists) return;
+        const d = snap.data();
+        const ts = d._salvoEm?.toDate?.();
+        const hora = ts ? ts.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '—';
+        _setSyncDot('ok', 'Última nuvem: ' + hora);
+      }).catch(() => {});
+    }, 300);
+  }
+}
 function closeSyncModal() { document.getElementById('syncModal').classList.remove('open'); }
 
 // Aliases para não quebrar referências antigas
@@ -6246,7 +6262,8 @@ function _fbAutoInit() {
     localStorage.setItem('sila_fb_workspace', wsId);
     _setSyncDot('saving', 'Conectando…');
 
-    _fbDocRef().get().then(async snap => {
+    // { source: 'server' } ignora cache local e busca sempre do Firebase
+    _fbDocRef().get({ source: 'server' }).then(async snap => {
       if (snap.exists) {
         const cloudData = snap.data();
         // Timestamp da nuvem em ms
@@ -6254,12 +6271,15 @@ function _fbAutoInit() {
         // Timestamp do localStorage (gravado por save())
         const localTs = window._silaLastSaveTs || 0;
 
-        // Firebase é a fonte de verdade: sempre aplica dados da nuvem se existirem.
-        // Exceção: só mantém local se o save local foi feito DEPOIS do save na nuvem
-        // e dentro desta mesma sessão (evita sobrescrever edições em andamento).
-        const GRACE_MS = 60000; // 1 min de tolerância
+        // SEMPRE usa dados da nuvem ao abrir a página.
+        // Só mantém local se o usuário JÁ fez edições NESTA sessão E o save local
+        // é mais recente que a nuvem (evita sobrescrever trabalho em andamento).
+        const GRACE_MS = 120000; // 2 min de tolerância
         const localSavedThisSession = window._silaHasSavedThisSession === true;
-        const cloudIsNewer = cloudTs > 0 && (!localSavedThisSession || (cloudTs + GRACE_MS) >= localTs);
+        const cloudIsNewer = cloudTs > 0 && (
+          !localSavedThisSession ||          // sem edições nesta sessão → sempre usa nuvem
+          cloudTs >= (localTs - GRACE_MS)    // nuvem é recente o suficiente
+        );
         if (cloudIsNewer) {
           // ── Nuvem é mais recente (ou igual dentro da margem) → aplica dados da nuvem ──
           const applyOk = _applyCloudData(cloudData);
@@ -6269,7 +6289,7 @@ function _fbAutoInit() {
           }
           const ts = cloudData._salvoEm?.toDate?.();
           _setSyncDot('ok', 'Salvo na nuvem às ' + (ts ? ts.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '—'));
-          toast('☁️ Dados sincronizados da nuvem!', 'success');
+          toast('☁️ Dados atualizados da nuvem! (' + hora + ')', 'success');
         } else {
           // ── Local é mais recente → envia dados locais para a nuvem ──
           _setSyncDot('saving', 'Enviando dados locais…');
