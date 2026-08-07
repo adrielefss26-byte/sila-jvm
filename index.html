@@ -105,7 +105,7 @@ header{background:var(--s1);border-bottom:1px solid var(--border);padding:0 18px
 .dk.r .dk-val{color:var(--red)}.dk.o .dk-val{color:var(--orange)}.dk.y .dk-val{color:var(--yellow)}.dk.g .dk-val{color:var(--g2)}
 .dk.c .dk-val{color:var(--cyan)}.dk.p .dk-val{color:var(--purple)}.dk.b .dk-val{color:#38bdf8}.dk.t .dk-val{color:#4ade80}
 .ctrl-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px}
-.ctrl-grid-row2{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+.ctrl-grid-row2{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .ctrl-card{background:var(--s2);border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;cursor:pointer;transition:all .15s;position:relative;overflow:hidden}
 .ctrl-card:hover{border-color:var(--border2);transform:translateY(-1px)}
 .ctrl-accent{position:absolute;top:0;left:0;right:0;height:3px}
@@ -875,23 +875,31 @@ td.c-atv{max-width:120px;overflow:hidden;text-overflow:ellipsis}
         </div>
       </div>
 
-      <!-- ROW 2: POSTOS -->
+      <!-- ROW 2: POSTOS — 3 cards no mesmo padrão -->
       <div class="ctrl-grid-row2">
-        <div class="ctrl-card" onclick="toggleCtrlSec('tanques')" style="grid-column:1/-1;grid-template-columns:repeat(4,1fr);display:grid;gap:10px;align-items:center;padding:10px 14px">
-          <div style="display:flex;align-items:center;gap:10px;grid-column:1/-1">
-            <div class="ctrl-accent" style="background:#f59e0b;position:absolute;top:0;left:0;right:0;height:3px"></div>
-            <span style="font-size:18px">⛽</span>
-            <div style="flex:1">
-              <div class="ctrl-lbl" style="margin-bottom:2px">Controle de Dados — Postos de Combustível</div>
-              <div style="display:flex;gap:12px;flex-wrap:wrap">
-                <span style="font-size:10px;color:var(--text4)">Tanques: <span id="ctrlValTanq" style="color:#f59e0b;font-family:var(--mono);font-weight:700">0</span></span>
-                <span style="font-size:10px;color:var(--text4)">Estanqueidade: <span id="ctrlValEst" style="color:#38bdf8;font-family:var(--mono);font-weight:700">0</span></span>
-                <span style="font-size:10px;color:var(--text4)">Hidrostático: <span id="ctrlValHid" style="color:var(--purple);font-family:var(--mono);font-weight:700">0</span></span>
-                <span id="ctrlSubTanq" style="font-size:10px;color:var(--red);font-weight:600"></span>
-              </div>
-            </div>
-            <span style="font-size:11px;color:var(--text4)">▾</span>
-          </div>
+        <div class="ctrl-card" onclick="toggleCtrlSec('tanques')">
+          <div class="ctrl-accent" style="background:#f59e0b"></div>
+          <div class="ctrl-icon">⛽</div>
+          <div class="ctrl-lbl">Tanques / Remoção</div>
+          <div class="ctrl-val" id="ctrlValTanq" style="color:#f59e0b">0</div>
+          <div class="ctrl-sub" id="ctrlSubTanq">registros</div>
+          <div class="ctrl-bar"><div class="ctrl-fill" id="ctrlBarTanq" style="background:#f59e0b;width:0%"></div></div>
+        </div>
+        <div class="ctrl-card" onclick="toggleCtrlSec('tanques')">
+          <div class="ctrl-accent" style="background:#38bdf8"></div>
+          <div class="ctrl-icon">🔵</div>
+          <div class="ctrl-lbl">Estanqueidade</div>
+          <div class="ctrl-val" id="ctrlValEst" style="color:#38bdf8">0</div>
+          <div class="ctrl-sub" id="ctrlSubEst">registros</div>
+          <div class="ctrl-bar"><div class="ctrl-fill" id="ctrlBarEst" style="background:#38bdf8;width:0%"></div></div>
+        </div>
+        <div class="ctrl-card" onclick="toggleCtrlSec('tanques')">
+          <div class="ctrl-accent" style="background:var(--purple)"></div>
+          <div class="ctrl-icon">💧</div>
+          <div class="ctrl-lbl">Hidrostático</div>
+          <div class="ctrl-val" id="ctrlValHid" style="color:var(--purple)">0</div>
+          <div class="ctrl-sub" id="ctrlSubHid">registros</div>
+          <div class="ctrl-bar"><div class="ctrl-fill" id="ctrlBarHid" style="background:var(--purple);width:0%"></div></div>
         </div>
       </div>
 
@@ -5599,15 +5607,20 @@ function renderCtrl(){
     const listEl=document.getElementById('ctrl-list-'+tipo);
     if(listEl)listEl.innerHTML=_ctrlListHTML(tipo,list);
   });
-  // posto-specific counters
-  const tlist=CTRL.tanques||[];
-  const subT=document.getElementById('ctrlValTanq');if(subT)subT.textContent=tlist.filter(x=>x.subtipo==='remocao').length;
-  const subE=document.getElementById('ctrlValEst');if(subE)subE.textContent=tlist.filter(x=>x.subtipo==='estanqueidade').length;
-  const subH=document.getElementById('ctrlValHid');if(subH)subH.textContent=tlist.filter(x=>x.subtipo==='hidrostatico').length;
-  const vencT=tlist.filter(x=>x.validade&&_ctrlDays(x.validade)<0).length;
-  const urgT=tlist.filter(x=>x.validade&&_ctrlDays(x.validade)>=0&&_ctrlDays(x.validade)<=30).length;
-  const subTxt=document.getElementById('ctrlSubTanq');
-  if(subTxt)subTxt.textContent=vencT>0?'⚠ '+vencT+' vencido'+(vencT!==1?'s':''):urgT>0?'⏰ '+urgT+' urgente'+(urgT!==1?'s':''):'';
+  // posto-specific counters — 3 cards separados (Tanques, Estanqueidade, Hidrostático)
+  var tlist=CTRL.tanques||[];
+  function _tanqFill(elValId, elSubId, elBarId, lista) {
+    var elVal=document.getElementById(elValId), elSub=document.getElementById(elSubId), elBar=document.getElementById(elBarId);
+    var n=lista.length;
+    var venc=lista.filter(function(x){return x.validade&&_ctrlDays(x.validade)<0;}).length;
+    var urg=lista.filter(function(x){return x.validade&&_ctrlDays(x.validade)>=0&&_ctrlDays(x.validade)<=30;}).length;
+    if(elVal) elVal.textContent=n;
+    if(elSub) elSub.textContent=venc>0?'⚠ '+venc+' vencido'+(venc!==1?'s':''):urg>0?'⏰ '+urg+' urgente'+(urg!==1?'s':''):n+' registro'+(n!==1?'s':'');
+    if(elBar){var ok=lista.filter(function(x){return !x.validade||_ctrlDays(x.validade)>30;}).length;elBar.style.width=(n>0?Math.min(100,Math.round(ok/n*100)):0)+'%';}
+  }
+  _tanqFill('ctrlValTanq','ctrlSubTanq','ctrlBarTanq',tlist.filter(function(x){return x.subtipo==='remocao';}));
+  _tanqFill('ctrlValEst','ctrlSubEst','ctrlBarEst',tlist.filter(function(x){return x.subtipo==='estanqueidade';}));
+  _tanqFill('ctrlValHid','ctrlSubHid','ctrlBarHid',tlist.filter(function(x){return x.subtipo==='hidrostatico';}));
 }
 
 function _ctrlDays(dt){return dt?Math.round((new Date(dt)-REF)/86400000):null;}
