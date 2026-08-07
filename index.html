@@ -1126,6 +1126,16 @@ td.c-atv{max-width:120px;overflow:hidden;text-overflow:ellipsis}
       <span style="margin-left:auto;font-size:9px;color:var(--text4)">clique 🖨 para relatório</span>
     </div>
     <div class="pend-doc-grid" id="pendDocGrid"></div>
+    <div style="margin-top:10px">
+      <button onclick="openRelAnalise()" style="display:flex;align-items:center;gap:8px;width:100%;background:rgba(14,165,233,.08);border:1px solid rgba(14,165,233,.3);border-radius:8px;padding:9px 14px;cursor:pointer;font-family:var(--sans)" onmouseover="this.style.borderColor='rgba(14,165,233,.6)'" onmouseout="this.style.borderColor='rgba(14,165,233,.3)'">
+        <span style="font-size:16px">📋</span>
+        <div style="flex:1;text-align:left">
+          <div style="font-size:11px;font-weight:600;color:#38bdf8">Relatório — Processos em Análise</div>
+          <div style="font-size:10px;color:var(--text4)">Lista todos os empreendimentos com situação "Em Análise"</div>
+        </div>
+        <span id="cntRelAnalise" style="font-family:var(--mono);font-size:14px;font-weight:700;color:#38bdf8">—</span>
+      </button>
+    </div>
   </div>
 
   <div class="alert-banner" id="alertBanner"><div class="pulse"></div><span id="alertText" style="color:#fca5a5"></span></div>
@@ -1240,9 +1250,14 @@ td.c-atv{max-width:120px;overflow:hidden;text-overflow:ellipsis}
       <div class="ms" id="relSub">—</div>
     </div>
     <div style="display:flex;gap:7px;align-items:center">
+      <button class="btn btn-ghost btn-sm" id="btnRelEdit" onclick="toggleRelEdit()" style="border-color:rgba(251,191,36,.4);color:#fbbf24">✏️ Editar</button>
       <button class="btn btn-primary btn-sm" onclick="printRel()">🖨 Imprimir</button>
       <button class="mc" onclick="closeRel()">✕</button>
     </div>
+  </div>
+  <div id="relEditBar" style="display:none;padding:8px 18px;background:rgba(251,191,36,.07);border-bottom:1px solid rgba(251,191,36,.2);font-size:11px;color:#fbbf24;align-items:center;gap:10px">
+    <span>✏️ <b>Modo edição ativo</b> — clique em qualquer texto para editar diretamente antes de imprimir.</span>
+    <button onclick="toggleRelEdit()" style="margin-left:auto;background:var(--g1);border:none;border-radius:5px;color:#000;font-size:10px;font-weight:700;padding:4px 12px;cursor:pointer">✅ Concluir</button>
   </div>
   <div class="mb" id="relBody" style="padding:12px 18px"></div>
 </div>
@@ -2819,6 +2834,7 @@ function addPrazo(cnpj,idx){
   recalcDays();
   PRAZO[cnpj].push({prazo:prazo,motivo:mot,registradoEm:new Date().toISOString().slice(0,10)});
   changes++;save();renderPInfo(idx);renderTable();renderAllCards();renderDash();
+  _updateCntAnalise();
   toast('Prazo registrado e atualizado!','success');
 }
 
@@ -5452,6 +5468,125 @@ function renderPendDocCards(){
   }).join('');
 
   document.getElementById('cs-pend-ct').textContent = grandTotal + ' com pendências';
+}
+
+
+// ── EDIÇÃO DO RELATÓRIO ───────────────────────────────────────────
+var _relEditMode = false;
+
+function toggleRelEdit() {
+  _relEditMode = !_relEditMode;
+  var bar  = document.getElementById('relEditBar');
+  var body = document.getElementById('relBody');
+  var btn  = document.getElementById('btnRelEdit');
+
+  if (_relEditMode) {
+    bar.style.display = 'flex';
+    btn.textContent   = '✅ Concluir';
+    btn.style.color   = 'var(--g1)';
+    btn.style.borderColor = 'rgba(74,222,128,.4)';
+    // Torna todos os textos editáveis dentro do relatório
+    body.querySelectorAll('.rel-emp-name, .rel-pend-doc, .rel-emp-meta span, .ms').forEach(function(el) {
+      el.contentEditable = 'true';
+      el.style.outline   = '1px dashed rgba(251,191,36,.5)';
+      el.style.borderRadius = '3px';
+      el.style.minWidth  = '20px';
+    });
+    // Permite editar o título e subtítulo
+    document.getElementById('relTitle').contentEditable = 'true';
+    document.getElementById('relSub').contentEditable   = 'true';
+    document.getElementById('relTitle').style.outline   = '1px dashed rgba(251,191,36,.5)';
+    document.getElementById('relSub').style.outline     = '1px dashed rgba(251,191,36,.5)';
+  } else {
+    bar.style.display = 'none';
+    btn.textContent   = '✏️ Editar';
+    btn.style.color   = '#fbbf24';
+    btn.style.borderColor = 'rgba(251,191,36,.4)';
+    // Remove contentEditable de todos
+    body.querySelectorAll('[contenteditable]').forEach(function(el) {
+      el.contentEditable = 'false';
+      el.style.outline   = '';
+      el.style.borderRadius = '';
+      el.style.minWidth  = '';
+    });
+    document.getElementById('relTitle').contentEditable = 'false';
+    document.getElementById('relSub').contentEditable   = 'false';
+    document.getElementById('relTitle').style.outline   = '';
+    document.getElementById('relSub').style.outline     = '';
+    toast('✅ Edições aplicadas — clique em 🖨 Imprimir para gerar o relatório', 'success');
+  }
+}
+
+// ── RELATÓRIO: PROCESSOS EM ANÁLISE ──────────────────────────────────
+function openRelAnalise() {
+  var lista = DATA.filter(function(d) {
+    return (d.situacao || '').toLowerCase().replace(/\s/g,'') === 'emanálise' ||
+           (d.situacao || '').toLowerCase().replace(/\s/g,'') === 'emanálise' ||
+           (d.situacao || '').toLowerCase() === 'em análise' ||
+           (d.situacao || '').toLowerCase() === 'em analise';
+  }).sort(function(a,b) {
+    function ts(r){ var dt=r.prazo||r.validade; if(!dt) return 9e14; var p=dt.split('-'); return p.length===3?new Date(+p[0],+p[1]-1,+p[2]).getTime():new Date(dt).getTime(); }
+    return ts(a)-ts(b);
+  });
+
+  var hoje = REF.toLocaleDateString('pt-BR',{day:'2-digit',month:'long',year:'numeric'});
+  document.getElementById('relTitle').textContent = 'Relatório — Processos em Análise';
+  document.getElementById('relSub').textContent   = lista.length + ' empreendimento' + (lista.length!==1?'s':'') + ' em análise · gerado em ' + hoje;
+
+  document.getElementById('relBody').innerHTML = lista.length === 0
+    ? '<div style="text-align:center;padding:40px;color:var(--text4)"><div style="font-size:32px;margin-bottom:8px">📋</div>Nenhum processo com situação "Em Análise".</div>'
+    : lista.map(function(d, idx) {
+        var p = PENDS[_empKey(d)];
+        var pend = p ? p.pendencias.filter(function(x){return x.status==='Pendente';}) : [];
+        var dl   = d.days_prazo != null ? d.days_prazo : d.days_validade;
+        var dlTxt = d.prazo ? fmtD(d.prazo) : (d.validade ? fmtD(d.validade) : '—');
+        var dlCls = dl===null?'color:var(--text4)':dl<0?'color:var(--red)':dl<=30?'color:var(--yellow)':'color:var(--g2)';
+        var pendHtml = pend.length > 0
+          ? '<div style="margin-top:8px;font-size:9px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--text4);margin-bottom:4px">📎 ' + pend.length + ' pendência' + (pend.length!==1?'s':'') + ' em aberto</div>'
+            + pend.map(function(pd,i){
+                return '<div class="rel-pend-item"><span class="rel-pend-num">'+(i+1)+'</span><span class="rel-pend-doc">'+pd.documento+'</span><span class="rel-pend-st"><span class="badge b-adeq"><span class="bd"></span>Pendente</span></span></div>';
+              }).join('')
+          : '<div style="margin-top:6px;font-size:10px;color:var(--g2)">✅ Sem pendências em aberto</div>';
+
+        return '<div class="rel-emp-block">'
+          + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:6px">'
+            + '<div>'
+              + '<div class="rel-emp-name">' + (idx+1) + '. ' + d.empresa + '</div>'
+              + '<div class="rel-emp-meta">'
+                + '<span class="mod-tag">' + (d.modalidade||'—') + '</span>'
+                + badgeH(d.situacao)
+                + '<span style="font-family:var(--mono);font-size:9px;color:var(--text4)">' + d.cnpj + '</span>'
+                + '<span style="font-size:10px;color:var(--text4)">📍 ' + (d.municipio||'—') + '</span>'
+              + '</div>'
+            + '</div>'
+            + '<div style="text-align:right;flex-shrink:0">'
+              + '<div style="font-size:9px;color:var(--text4);margin-bottom:2px">Prazo / Validade</div>'
+              + '<div style="font-family:var(--mono);font-size:11px;font-weight:600;' + dlCls + '">' + dlTxt + (dl!==null?' ('+(dl<0?dl+'d':'+'+dl+'d')+')':'') + '</div>'
+            + '</div>'
+          + '</div>'
+          + pendHtml
+          + '</div>';
+      }).join('');
+
+  // Atualiza _relEditMode para false ao reabrir
+  _relEditMode = false;
+  var bar = document.getElementById('relEditBar');
+  if (bar) bar.style.display = 'none';
+  var btn = document.getElementById('btnRelEdit');
+  if (btn) { btn.textContent='✏️ Editar'; btn.style.color='#fbbf24'; btn.style.borderColor='rgba(251,191,36,.4)'; }
+
+  document.getElementById('relOv').classList.add('open');
+}
+
+// Atualiza contador "Em Análise" no botão
+function _updateCntAnalise() {
+  var el = document.getElementById('cntRelAnalise');
+  if (!el) return;
+  var cnt = DATA.filter(function(d){
+    return (d.situacao||'').toLowerCase().replace(/\s+/g,' ').trim() === 'em análise' ||
+           (d.situacao||'').toLowerCase().replace(/\s+/g,' ').trim() === 'em analise';
+  }).length;
+  el.textContent = cnt;
 }
 
 function openRel(defId){
@@ -8337,6 +8472,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   populateDropdowns();renderAllCards();renderDash();renderCtrl();
   updateChangesBar();updateFilterTag();applyFilters();
   _setSyncDot('off','Nuvem');
+  _updateCntAnalise();
   // ── Firebase: inicializa depois que tudo está pronto ──
   if (typeof firebase !== 'undefined' && !window._fbSdkFailed) {
     _fbAutoInit();
