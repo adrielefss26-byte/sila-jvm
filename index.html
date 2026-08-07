@@ -1250,9 +1250,9 @@ td.c-atv{max-width:120px;overflow:hidden;text-overflow:ellipsis}
       <div class="ms" id="relSub">—</div>
     </div>
     <div style="display:flex;gap:7px;align-items:center">
-      <label style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text2);cursor:pointer">
-        <input type="checkbox" id="relShowAll" onchange="reRenderRel()" style="accent-color:var(--g1)">
-        Todos
+      <label style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text2);cursor:pointer" title="Quando marcado, exibe apenas empresas com pendências em aberto">
+        <input type="checkbox" id="relOnlyPend" onchange="reRenderRel()" style="accent-color:var(--g1)">
+        Só com pendências
       </label>
       <button class="btn btn-ghost btn-sm" id="btnRelEdit" onclick="toggleRelEdit()" style="border-color:rgba(251,191,36,.4);color:#fbbf24">✏️ Editar</button>
       <button class="btn btn-primary btn-sm" onclick="printRel()">🖨 Imprimir</button>
@@ -5603,20 +5603,23 @@ function openRel(defId){
   // Reseta modo edição ao abrir novo relatório
   if (_relEditMode) toggleRelEdit();
 
-  const showAll = document.getElementById('relShowAll')?.checked || false;
+  // onlyPend marcado = só com pendências; desmarcado (padrão) = todos
+  const onlyPend = document.getElementById('relOnlyPend')?.checked || false;
   const emps = DATA.filter(def.match).map(d => {
     const p = PENDS[_empKey(d)];
     const pendentes = p ? p.pendencias.filter(x=>x.status==='Pendente') : [];
     const concluidos = p ? p.pendencias.filter(x=>x.status==='Concluído') : [];
     return {...d, _pendentes: pendentes, _concluidos: concluidos, _total: p?p.pendencias.length:0};
-  }).filter(d => showAll || d._pendentes.length>0).sort((a,b)=>{
+  }).filter(d => !onlyPend || d._pendentes.length>0).sort((a,b)=>{
     function toTs(r){var dt=r.prazo||r.validade;if(!dt)return 99999999999999;var p=dt.split('-');return p.length===3?new Date(+p[0],+p[1]-1,+p[2]).getTime():new Date(dt).getTime();}
     return toTs(a)-toTs(b);
   });
 
   const hoje = REF.toLocaleDateString('pt-BR',{day:'2-digit',month:'long',year:'numeric'});
   document.getElementById('relTitle').textContent = `Relatório de Pendências — ${def.label}`;
-  document.getElementById('relSub').textContent = `${emps.length} empreendimento${emps.length!==1?'s':''} com documentação pendente · gerado em ${hoje}`;
+  const totalCat = DATA.filter(def.match).length;
+  const comPend  = DATA.filter(def.match).filter(d=>{const p=PENDS[_empKey(d)];return p&&p.pendencias.some(x=>x.status==='Pendente');}).length;
+  document.getElementById('relSub').textContent = `${emps.length} de ${totalCat} empreendimento${totalCat!==1?'s':''} · ${comPend} com pendência${comPend!==1?'s':''} em aberto · gerado em ${hoje}`;
 
   document.getElementById('relBody').innerHTML = emps.length === 0
     ? `<div style="text-align:center;padding:40px;color:var(--text4)"><div style="font-size:32px;margin-bottom:8px">✅</div>Nenhuma pendência em aberto para esta categoria.</div>`
