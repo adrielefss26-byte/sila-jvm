@@ -6420,12 +6420,12 @@ function disconnectSync() { fbDisconnect(); }
 // ── Auto-inicializar com credenciais fixas JVM Ambiental ────────────────
 function _fbAutoInit() {
   const cfg = {
-    apiKey: "AIzaSyDXZMcsktI7O1JMNzbiE_rr8x7EQSUqHsg",
-    authDomain: "sila-jvm-ambiental.firebaseapp.com",
-    projectId: "sila-jvm-ambiental",
-    storageBucket: "sila-jvm-ambiental.firebasestorage.app",
-    messagingSenderId: "400314822591",
-    appId: "1:400314822591:web:e80bcae5ef6da30e7dbb0a"
+    apiKey: "AIzaSyCT722Ygzzz_iuqXMGK2akbLUi-k7DTgrE",
+    authDomain: "sila-dbe38.firebaseapp.com",
+    projectId: "sila-dbe38",
+    storageBucket: "sila-dbe38.firebasestorage.app",
+    messagingSenderId: "575514161550",
+    appId: "1:575514161550:web:112f697005b4ff7f8f34df"
   };
   const wsId = "jvm-ambiental";
 
@@ -8594,7 +8594,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   _updateCntAnalise();
   // ── Firebase: inicializa depois que tudo está pronto ──
   if (typeof firebase !== 'undefined' && !window._fbSdkFailed) {
-    _fbAutoInit();
+    localStorage.removeItem('sila_fb_config'); _fbAutoInit();
   } else if (localStorage.getItem('sila_fb_workspace')) {
     // Tem workspace configurado mas SDK não carregou — modo offline, silent
     _setSyncDot('off', 'Offline');
