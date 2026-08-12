@@ -6435,6 +6435,7 @@ function _fbAutoInit() {
     _fbWorkspace  = wsId;
     _fbConfigured = true;
     localStorage.setItem('sila_fb_config', JSON.stringify(cfg));
+    var _sb=document.getElementById('syncBanner'); if(_sb) _sb.style.display='none';
     localStorage.setItem('sila_fb_workspace', wsId);
     _setSyncDot('saving', 'Conectando…');
 
@@ -8594,7 +8595,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   _updateCntAnalise();
   // ── Firebase: inicializa depois que tudo está pronto ──
   if (typeof firebase !== 'undefined' && !window._fbSdkFailed) {
-    localStorage.removeItem('sila_fb_config'); _fbAutoInit();
+    localStorage.removeItem('sila_fb_config'); _fbAutoInit(); setTimeout(function(){ if(window._fbConfigured){ var sb=document.getElementById('syncBanner'); if(sb) sb.style.display='none'; } }, 2000);
   } else if (localStorage.getItem('sila_fb_workspace')) {
     // Tem workspace configurado mas SDK não carregou — modo offline, silent
     _setSyncDot('off', 'Offline');
