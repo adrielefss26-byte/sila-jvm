@@ -7358,16 +7358,21 @@ const _AUTH = {
 
 /** SHA-256 via Web Crypto API (nativo, sem dependências) */
 async function _authHash(str) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+  return crypto.subtle.digest('SHA-256', new TextEncoder().encode(str)).then(function(buf) {
+    return Array.from(new Uint8Array(buf)).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+  });
 }
 
 /** Pré-hash todas as senhas e apaga texto simples da memória */
-async async function _authInitCredentials() {
-  for (const [user, pwd] of Object.entries(_AUTH._seedUsers)) {
-    _AUTH._credentials[user] = await _authHash(pwd);
-  }
-  delete _AUTH._seedUsers; // limpa texto simples
+function _authInitCredentials() {
+  var users = Object.entries(_AUTH._seedUsers);
+  return Promise.all(users.map(function(entry) {
+    return _authHash(entry[1]).then(function(hash) {
+      _AUTH._credentials[entry[0]] = hash;
+    });
+  })).then(function() {
+    delete _AUTH._seedUsers;
+  });
 }
 
 /** Gera token de sessão seguro */
@@ -7588,13 +7593,17 @@ function _authShowSessionInfo() {
 
 /** Ponto de entrada — chamado no DOMContentLoaded */
 async async function _authBootstrap() {
-  await _authInitCredentials();
-  const session = _authCheckSession();
-  if (session) {
-    _authShowApp(session.user);
-  } else {
+  _authInitCredentials().then(function() {
+    var session = _authCheckSession();
+    if (session) {
+      _authShowApp(session.user);
+    } else {
+      _authShowLogin();
+    }
+  }).catch(function(e) {
+    console.error('Auth init error:', e);
     _authShowLogin();
-  }
+  });
 }
 
 // ──────────────────────────────────────────────────────────
