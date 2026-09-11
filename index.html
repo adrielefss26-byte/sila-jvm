@@ -6479,7 +6479,7 @@ function connectSync()    { fbConnect(); }
 function disconnectSync() { fbDisconnect(); }
 
 // ── Auto-inicializar com credenciais fixas JVM Ambiental ────────────────
-function _fbAutoInit() {
+async function _fbAutoInit() {
   const cfg = {
     apiKey: "AIzaSyCT722Ygzzz_iuqXMGK2akbLUi-k7DTgrE",
     authDomain: "sila-dbe38.firebaseapp.com",
@@ -7363,7 +7363,7 @@ async function _authHash(str) {
 }
 
 /** Pré-hash todas as senhas e apaga texto simples da memória */
-async function _authInitCredentials() {
+async async function _authInitCredentials() {
   for (const [user, pwd] of Object.entries(_AUTH._seedUsers)) {
     _AUTH._credentials[user] = await _authHash(pwd);
   }
@@ -7587,7 +7587,7 @@ function _authShowSessionInfo() {
 }
 
 /** Ponto de entrada — chamado no DOMContentLoaded */
-async function _authBootstrap() {
+async async function _authBootstrap() {
   await _authInitCredentials();
   const session = _authCheckSession();
   if (session) {
