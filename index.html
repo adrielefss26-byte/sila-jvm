@@ -3785,6 +3785,7 @@ function renderPCond(idx){
     <div class="ai-preview-wrap" id="aiPreview-${idx}">
       <div class="ai-preview-hdr">
         <span style="font-size:13px;font-weight:700;color:var(--cyan)">🤖 Condicionantes extraídas pela IA</span>
+        ${(_aiMetadata[idx]||{}).dataEmissao ? `<span style="font-size:10px;background:rgba(74,222,128,.15);color:#4ade80;padding:2px 8px;border-radius:5px;margin-left:6px">📅 Emissão: ${fmtD((_aiMetadata[idx]||{}).dataEmissao)} — prazos calculados automaticamente</span>` : ''}
         <span style="font-size:11px;color:var(--text3)" id="aiPreviewCount-${idx}"></span>
         <span style="font-size:10px;color:var(--text4);margin-left:auto">Revise, edite ou exclua antes de confirmar</span>
       </div>
@@ -4000,6 +4001,27 @@ function _extrairCondicionantesLocal(texto) {
     meta.dataValidade = p[2]+'-'+p[1].padStart(2,'0')+'-'+p[0].padStart(2,'0');
   }
 
+  // Extrai data de emissão da licença
+  const mEmissao = texto.match(/Data\s+de\s+Emiss[aã]o\s*[:\-]?\s*(\d{2}\/\d{2}\/\d{4})/i)
+                || texto.match(/Emitida\s+em\s*[:\-]?\s*(\d{2}\/\d{2}\/\d{4})/i)
+                || texto.match(/Paranava[íi],\s*\d{1,2}\s+de\s+[A-Za-zçÇãÃõÕáÁéÉíÍóÓúÚ]+\s+de\s+(\d{4})/i);
+  if(mEmissao) {
+    // Formato DD/MM/YYYY ou só o ano (da assinatura "Paranavaí, X de Mês de AAAA")
+    if(mEmissao[1].includes('/')) {
+      const p = mEmissao[1].split('/');
+      meta.dataEmissao = p[2]+'-'+p[1].padStart(2,'0')+'-'+p[0].padStart(2,'0');
+    }
+  }
+  // Fallback: usa a data de início de validade como emissão (licença começa na emissão)
+  if(!meta.dataEmissao && meta.dataValidade) {
+    // Tenta extrair do texto a data de início do prazo de validade
+    const mInicio = texto.match(/(?:vigência|emissão|emiss[aã]o|partir\s+de)[^\d]{0,20}(\d{2}\/\d{2}\/\d{4})/i);
+    if(mInicio) {
+      const p = mInicio[1].split('/');
+      meta.dataEmissao = p[2]+'-'+p[1].padStart(2,'0')+'-'+p[0].padStart(2,'0');
+    }
+  }
+
   meta.modalidade = /RENOVA[ÇC][ÃA]O\s+DE\s+LICEN[ÇC]A\s+DE\s+OPERA[ÇC][ÃA]O/i.test(texto) ? 'RLO' :
                     /LICEN[ÇC]A\s+DE\s+OPERA[ÇC][ÃA]O/i.test(texto)                          ? 'LO'  :
                     /LICEN[ÇC]A\s+PR[ÉE]VIA/i.test(texto)                                     ? 'LP'  :
@@ -4082,7 +4104,34 @@ function _extrairCondicionantesLocal(texto) {
 
   return { metadata: meta, condicionantes };
 }
-async function aiProcessPdf(ev,idx){
+async 
+// ── Calcula prazo de condicionante a partir da data de emissão da licença ──
+function _calcPrazoCond(textoCond, dataEmissao) {
+  if(!dataEmissao) return null;
+  const base = new Date(dataEmissao + 'T00:00:00');
+  if(isNaN(base)) return null;
+
+  // Padrão: "X dias", "X meses", "X ano(s)"
+  const mDias  = textoCond.match(/(\d+)\s*dias?/i);
+  const mMeses = textoCond.match(/(\d+)\s*mes(?:es)?/i);
+  const mAnos  = textoCond.match(/(\d+)\s*anos?/i);
+
+  let result = null;
+  if(mDias)  { const d=new Date(base); d.setDate(d.getDate()+parseInt(mDias[1]));   result=d; }
+  if(mMeses) { const d=new Date(base); d.setMonth(d.getMonth()+parseInt(mMeses[1])); result=d; }
+  if(mAnos)  { const d=new Date(base); d.setFullYear(d.getFullYear()+parseInt(mAnos[1])); result=d; }
+
+  // Padrão: "até DD/MM/YYYY" ou "prazo: DD/MM/YYYY"
+  if(!result) {
+    const mData = textoCond.match(/(?:at[eé]|prazo[:\-]?)\s*(\d{2})\/(\d{2})\/(\d{4})/i);
+    if(mData) result = new Date(mData[3]+'-'+mData[2]+'-'+mData[1]+'T00:00:00');
+  }
+
+  if(!result) return null;
+  return result.toISOString().slice(0,10); // YYYY-MM-DD
+}
+
+function aiProcessPdf(ev,idx){
   const file=ev.target.files[0];
   if(!file){return;}
   if(file.type!=='application/pdf'){toast('Selecione um arquivo PDF','error');return;}
@@ -4170,7 +4219,7 @@ function aiRenderPreview(idx){
       <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap">
         <span style="font-family:var(--mono);font-size:10px;background:var(--s3);padding:2px 7px;border-radius:5px;color:var(--g2);flex-shrink:0">Cond. ${c.numero||'—'}</span>
         <span class="${aiTipoCls(c.tipo)}">${c.tipo||'Outra'}</span>
-        ${c.prazo?`<span style="font-size:10px;color:var(--text3);background:var(--s3);padding:2px 7px;border-radius:5px">📅 ${fmtD(c.prazo)}</span>`:'<span style="font-size:10px;color:var(--text4)">Sem prazo</span>'}
+        ${c.prazo?`<span style="font-size:10px;color:var(--text3);background:var(--s3);padding:2px 7px;border-radius:5px">📅 ${fmtD(c.prazo)}</span>`:((_aiMetadata[idx]||{}).dataEmissao&&_calcPrazoCond(c.texto,(_aiMetadata[idx]||{}).dataEmissao))?`<span style="font-size:10px;color:#4ade80;background:rgba(74,222,128,.12);padding:2px 7px;border-radius:5px" title="Calculado a partir da data de emissão">📅 ${fmtD(_calcPrazoCond(c.texto,(_aiMetadata[idx]||{}).dataEmissao))} ✨</span>`:'<span style="font-size:10px;color:var(--text4)">Sem prazo</span>'}
         <div style="margin-left:auto;display:flex;gap:5px">
           <button class="btn btn-ghost btn-xs" onclick="aiToggleEdit(${idx},${i})" title="Editar">✏️</button>
           <button class="btn btn-danger btn-xs" onclick="aiDeletePreview(${idx},${i})" title="Excluir">🗑</button>
@@ -4251,16 +4300,28 @@ function aiConfirmSave(idx,ec){
   if(!list||list.length===0){toast('Nenhuma condicionante para salvar','error');return;}
   const realCnpj=DATA[idx].cnpj;
   if(!COND[realCnpj])COND[realCnpj]=[];
-  let adicionadas=0;
+  const dataEmissao=(_aiMetadata[idx]||{}).dataEmissao||null;
+  let adicionadas=0,calculos=0;
   list.forEach(c=>{
     if(!c.texto)return;
+    // Calcula prazo automaticamente se não foi editado manualmente
+    let prazoFinal = c.prazo || null;
+    if(!prazoFinal && dataEmissao){
+      prazoFinal = _calcPrazoCond(c.texto, dataEmissao);
+      if(prazoFinal) calculos++;
+    }
+    const obsBase = c.obs||'';
+    const obsEmissao = dataEmissao && prazoFinal && !c.prazo
+      ? (obsBase ? obsBase+'\n' : '')+'📅 Prazo calculado a partir da emissão: '+fmtD(dataEmissao)
+      : obsBase;
     COND[realCnpj].push({
       texto:    c.texto,
       numero:   c.numero||'',
       tipo:     c.tipo||'Outra',
-      prazo:    c.prazo||null,
+      prazo:    prazoFinal,
       status:   'Pendente',
-      obs:      c.obs||''
+      obs:      obsEmissao,
+      dataEmissaoBase: dataEmissao||null
     });
     adicionadas++;
   });
