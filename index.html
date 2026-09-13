@@ -4104,7 +4104,6 @@ function _extrairCondicionantesLocal(texto) {
 
   return { metadata: meta, condicionantes };
 }
-async 
 // ── Calcula prazo de condicionante a partir da data de emissão da licença ──
 function _calcPrazoCond(textoCond, dataEmissao) {
   if(!dataEmissao) return null;
@@ -6501,7 +6500,7 @@ async function _fbAutoInit() {
     _setSyncDot('saving', 'Conectando…');
 
     // { source: 'server' } ignora cache local e busca sempre do Firebase
-    _fbDocRef().get({ source: 'server' }).then(async snap => {
+    _fbDocRef().get({ source: 'server' }).then(async function(snap) {
       if (snap.exists) {
         const cloudData = snap.data();
         // Timestamp da nuvem em ms
@@ -7684,26 +7683,6 @@ function _authToggleEyeEl(inputId, btn) {
   btn.textContent = isText ? '👁' : '🙈';
 }
 
-function _authShowSessionInfo() {
-  // Sessão lembrada (localStorage)
-  const rawL = localStorage.getItem(_AUTH.REMEMBER_KEY);
-  if (rawL) {
-    try {
-      const s    = JSON.parse(rawL);
-      const dias = Math.max(0, Math.floor((s.expires - Date.now()) / (24 * 60 * 60 * 1000)));
-      toast(`👤 ${s.user} · Sessão salva · expira em ${dias} dia(s)`, 'info');
-      return;
-    } catch(e) {}
-  }
-  // Sessão normal (sessionStorage)
-  const raw = sessionStorage.getItem(_AUTH.SESSION_KEY);
-  if (!raw) return;
-  try {
-    const s   = JSON.parse(raw);
-    const rem = Math.max(0, Math.floor((_AUTH.INACTIVITY_MS - (Date.now() - s.lastActivity)) / 60000));
-    toast(`👤 ${s.user} · Sessão expira em ${rem} min de inatividade`, 'info');
-  } catch(e) {}
-}
 
 function _openAiKeyCfg(){
   const ov=document.getElementById('aiKeyCfgOverlay');
