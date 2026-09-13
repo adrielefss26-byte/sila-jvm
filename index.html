@@ -7357,7 +7357,7 @@ const _AUTH = {
 };
 
 /** SHA-256 via Web Crypto API (nativo, sem dependências) */
-async function _authHash(str) {
+function _authHash(str) {
   return crypto.subtle.digest('SHA-256', new TextEncoder().encode(str)).then(function(buf) {
     return Array.from(new Uint8Array(buf)).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
   });
@@ -7510,48 +7510,49 @@ function _authShowLogin(msg) {
 }
 
 /** Tenta realizar login */
-async function _authLogin() {
-  const uEl   = document.getElementById('loginUser');
-  const pEl   = document.getElementById('loginPwd');
-  const eEl   = document.getElementById('loginErr');
-  const bEl   = document.getElementById('loginBtn');
-  const box   = document.getElementById('loginBox');
-  const remEl = document.getElementById('loginRemember');
+function _authLogin() {
+  var uEl   = document.getElementById('loginUser');
+  var pEl   = document.getElementById('loginPwd');
+  var eEl   = document.getElementById('loginErr');
+  var bEl   = document.getElementById('loginBtn');
+  var box   = document.getElementById('loginBox');
+  var remEl = document.getElementById('loginRemember');
 
-  const user     = (uEl?.value || '').trim();
-  const pwd      = pEl?.value  || '';
-  const remember = remEl?.checked || false;
-  eEl.style.display = 'none';
+  var user     = (uEl ? uEl.value : '').trim();
+  var pwd      = pEl ? pEl.value : '';
+  var remember = remEl ? remEl.checked : false;
+  if (eEl) eEl.style.display = 'none';
 
   if (!user || !pwd) {
-    eEl.textContent   = 'Preencha usuário e senha.';
-    eEl.style.display = 'block';
+    if (eEl) { eEl.textContent = 'Preencha usuário e senha.'; eEl.style.display = 'block'; }
     return;
   }
 
-  bEl.disabled    = true;
-  bEl.textContent = 'Verificando…';
+  if (bEl) { bEl.disabled = true; bEl.textContent = 'Verificando…'; }
 
-  const hash     = await _authHash(pwd);
-  const expected = _AUTH._credentials[user];
-  const ok       = expected && hash === expected;
+  _authHash(pwd).then(function(hash) {
+    var expected = _AUTH._credentials[user];
+    var ok       = expected && hash === expected;
 
-  if (ok) {
-    _authSaveSession(user, remember);
-    _authShowApp(user);
-  } else {
-    eEl.textContent   = '❌ Usuário ou senha incorretos.';
-    eEl.style.display = 'block';
-    pEl.value         = '';
-    box.style.animation = 'none';
-    // Força reflow para re-disparar a animação
-    void box.offsetWidth;
-    box.style.animation = 'shake 0.4s ease';
-    setTimeout(() => pEl.focus(), 10);
-  }
-
-  bEl.disabled    = false;
-  bEl.textContent = 'Entrar';
+    if (ok) {
+      _authSaveSession(user, remember);
+      _authShowApp(user);
+    } else {
+      if (eEl) { eEl.textContent = '❌ Usuário ou senha incorretos.'; eEl.style.display = 'block'; }
+      if (pEl) pEl.value = '';
+      if (box) {
+        box.style.animation = 'none';
+        void box.offsetWidth;
+        box.style.animation = 'shake 0.4s ease';
+      }
+      setTimeout(function(){ if(pEl) pEl.focus(); }, 10);
+    }
+    if (bEl) { bEl.disabled = false; bEl.textContent = 'Entrar'; }
+  }).catch(function(e) {
+    console.error('Login error:', e);
+    if (eEl) { eEl.textContent = 'Erro interno. Tente novamente.'; eEl.style.display = 'block'; }
+    if (bEl) { bEl.disabled = false; bEl.textContent = 'Entrar'; }
+  });
 }
 
 /** Logout explícito */
@@ -7592,7 +7593,7 @@ function _authShowSessionInfo() {
 }
 
 /** Ponto de entrada — chamado no DOMContentLoaded */
-async async function _authBootstrap() {
+async function _authBootstrap() {
   _authInitCredentials().then(function() {
     var session = _authCheckSession();
     if (session) {
