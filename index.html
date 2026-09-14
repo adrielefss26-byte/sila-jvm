@@ -9101,7 +9101,15 @@ function extrairDadosLicencaIAT(textoPdf) {
     condicionantes: { estanqueidade: '', hidrostatico: '', analiseCSAO: '', analisePoco: '' }
   };
   try {
-    var t = (textoPdf || '').replace(/EM BRANCO/gi, ' ').replace(/\s{3,}/g, '  ');
+    var t = (textoPdf || '');
+    // Limpeza do artefato "EM BRANCO" do PDF do IAT (texto de páginas em branco
+    // que o pdf.js intercala com o conteúdo real, às vezes colado nos tokens)
+    t = t.replace(/\bEM(\d{6})\s+BRANCO\b/g, '$1');  // EM190813 BRANCO → 190813
+    t = t.replace(/([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ])EM([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ])/g, '$1$2'); // EMtransmissões → transmissões
+    t = t.replace(/\bEM\s+BRANCO\b/gi, ' ');          // EM BRANCO isolado → espaço
+    t = t.replace(/\bBRANCO\b/g, ' ');                 // BRANCO residual → espaço
+    t = t.replace(/\s{3,}/g, ' ');                     // múltiplos espaços → 1
+    t = t.replace(/\n[ \t]+\n/g, '\n\n');              // linhas só com espaços
 
     // ── 1. BLOCO 3.1 — delimitado entre "3.1 TANQUE DE COMBUSTÍVEL" e "3.2 ÁGUA" ──────
     var bloco31 = '';
@@ -9499,6 +9507,17 @@ async function sascImportarLicenca(file, idx) {
     }
 
     var r = DATA[idx] || {};
+
+    // ── Limpeza do artefato "EM BRANCO" do PDF do IAT ────────────
+    // O PDF tem camadas sobrepostas (páginas em branco) que intercalam
+    // "EM BRANCO" e até "EM" colado em tokens reais
+    try {
+      texto = texto.replace(/EM(\d{6})\s+BRANCO/g, '$1');
+      texto = texto.replace(/([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ])EM([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ])/g, '$1$2');
+      texto = texto.replace(/EM\s+BRANCO/gi, ' ');
+      texto = texto.replace(/BRANCO/g, ' ');
+      texto = texto.replace(/[ 	]{3,}/g, ' ');
+    } catch(eLimpa) {}
 
     // ── Extrai dados gerais ────────────────────────────────────────
     var meta = _sascExtrairMeta(texto);
