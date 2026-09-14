@@ -2847,6 +2847,23 @@ function openPanel(idx){
   const llist=LICHI[_key]||[];document.getElementById('lics-badge').textContent=llist.length>0?llist.length:'';
   const clist=COND[_key]||[];const cpend=clist.filter(x=>x.status==='Pendente').length;document.getElementById('cond-badge').textContent=cpend>0?cpend:'';
   renderTable();switchTab(activeTab,idx);
+  try {
+    var _bar = document.getElementById('sasc-upload-bar');
+    if (!_bar) {
+      // Cria a barra de upload dinamicamente se não existir
+      _bar = document.createElement('div');
+      _bar.id = 'sasc-upload-bar';
+      _bar.style.cssText = 'padding:5px 12px;background:rgba(56,189,248,.07);border-bottom:1px solid var(--border,#333)';
+      _bar.innerHTML = '<label style="cursor:pointer;font-size:11px;color:var(--cyan,#67e8f9);display:flex;align-items:center;gap:6px">' +
+        '<input type="file" accept=".pdf" style="display:none" id="sasc-pdf-input" onchange="(function(e){var ix=DATA.findIndex(function(d){return d._id===selectedId;});if(ix>=0&&e.target.files[0])sascImportarLicenca(e.target.files[0],ix);e.target.value=\'\';})(event)">' +
+        '📄 Importar Dados da Licença (PDF)</label>';
+      var panelHdr = document.querySelector('#sidePanel .panel-hdr');
+      if (panelHdr && panelHdr.parentNode) {
+        panelHdr.parentNode.insertBefore(_bar, panelHdr.nextSibling);
+      }
+    }
+    if (_bar) _bar.style.display = _isPosto(r) ? 'block' : 'none';
+  } catch(e) { console.warn('[SASC] upload bar:', e); }
 }
 function closePanel(){selectedId=null;document.getElementById('sidePanel').classList.add('hidden');renderTable();}
 function switchTab(tab,idxOv){
@@ -2930,6 +2947,7 @@ function renderPInfo(idx){
     </div></div>
     ${tot>0?`<div><div class="ps-title">Pendências recentes</div>${p.pendencias.slice(0,4).map((pd,i)=>`<div style="display:flex;align-items:flex-start;gap:6px;padding:6px 8px;background:var(--s2);border-radius:6px;margin-bottom:4px"><span style="font-family:var(--mono);font-size:9px;color:var(--text4);flex-shrink:0;margin-top:1px">${i+1}</span><span style="flex:1;font-size:10px;line-height:1.3;color:var(--text2)">${pd.documento.substring(0,85)}${pd.documento.length>85?'…':''}</span><span class="badge ${pd.status==='Concluído'?'b-def':pd.status==='Pendente'?'b-adeq':'b-agu'}" style="flex-shrink:0">${pd.status}</span></div>`).join('')}${tot>4?`<button class="btn btn-ghost btn-sm" onclick="switchTab('pend')" style="width:100%;margin-top:4px">Ver todas (${tot}) →</button>`:''}</div>`:''}
     ${_prazosHTML(_empKey(r),idx)}
+    ${_renderSascBlock(r)}
     <div style="display:flex;gap:7px;margin-top:10px"><button class="btn btn-ghost btn-sm" style="flex:1" onclick="switchTab('pend')">📎 Pendências</button><button class="btn btn-ghost btn-sm" style="flex:1" onclick="switchTab('edit')">✎ Editar</button></div>`;
 }
 function _isPrecadastro(r){return (r.situacao||'').toLowerCase().trim()==='pré cadastro';}
@@ -9115,6 +9133,483 @@ function relExportExcel() {
     XLSX.writeFile(wb, 'SILA_'+titulo.replace(/\s+/g,'_')+'_'+hoje+'.xlsx');
     toast('✅ Excel exportado com sucesso!', 'success');
   } catch(e) { console.error('[REL] Excel:', e); toast('Erro ao exportar Excel','error'); }
+}
+
+
+
+// ═══════════════════════════════════════════════════════════════════
+// MÓDULO SASC — Postos de Combustíveis
+// Inserção isolada — não altera variáveis globais existentes
+// ═══════════════════════════════════════════════════════════════════
+
+// ── Helper: detecta se o registro é um posto ──────────────────────
+function _isPosto(r) {
+  if (!r) return false;
+  var atv = (r.atividade || '').toLowerCase();
+  return atv.includes('posto') || atv.includes('trr') ||
+         atv.includes('combustível') || atv.includes('combustivel') ||
+         atv.includes('revendedor') || atv.includes('lubrificaç');
+}
+
+// ── Helper: calcula próxima data com base em periodicidade ─────────
+function _sascProximo(ultimaData, periodicidade) {
+  try {
+    if (!ultimaData || !periodicidade) return null;
+    var d = new Date(ultimaData + 'T00:00:00');
+    if (isNaN(d)) return null;
+    var p = String(periodicidade);
+    if (p === 'mensal')     d.setMonth(d.getMonth() + 1);
+    else if (p === 'trimestral') d.setMonth(d.getMonth() + 3);
+    else if (p === 'semestral')  d.setMonth(d.getMonth() + 6);
+    else if (p === 'anual')      d.setFullYear(d.getFullYear() + 1);
+    else if (p === 'bienal')     d.setFullYear(d.getFullYear() + 2);
+    else if (p === 'trienal')    d.setFullYear(d.getFullYear() + 3);
+    else if (p === 'quinquenal') d.setFullYear(d.getFullYear() + 5);
+    else return null;
+    return d.toISOString().slice(0, 10);
+  } catch(e) { return null; }
+}
+
+// ── Salva campos SASC em CTRL.tanques (cria entrada por empresa) ───
+function sascSalvar(cnpj) {
+  try {
+    if (!CTRL) CTRL = {};
+    if (!CTRL.tanques) CTRL.tanques = [];
+
+    // Lê valores do formulário SASC embutido na aba Info
+    var f = {
+      periodoEstanq:  (document.getElementById('sasc-periodo-estanq-' + cnpj) || {}).value || '',
+      ultimoEstanq:   (document.getElementById('sasc-ultimo-estanq-'  + cnpj) || {}).value || '',
+      periodoHidro:   (document.getElementById('sasc-periodo-hidro-'  + cnpj) || {}).value || '',
+      ultimoHidro:    (document.getElementById('sasc-ultimo-hidro-'   + cnpj) || {}).value || '',
+      dataInstalacao: (document.getElementById('sasc-data-install-'   + cnpj) || {}).value || '',
+      vidaUtil:       (document.getElementById('sasc-vida-util-'      + cnpj) || {}).value || '25',
+    };
+
+    f.proximoEstanq  = _sascProximo(f.ultimoEstanq,   f.periodoEstanq);
+    f.proximoHidro   = _sascProximo(f.ultimoHidro,    f.periodoHidro);
+    f.prazoRemocao   = f.dataInstalacao ? (function() {
+      var d = new Date(f.dataInstalacao + 'T00:00:00');
+      d.setFullYear(d.getFullYear() + parseInt(f.vidaUtil || 25));
+      return d.toISOString().slice(0, 10);
+    })() : null;
+
+    // Procura entrada existente para este cnpj com subtipo 'sasc_dados'
+    var idx = CTRL.tanques.findIndex(function(t) {
+      return t._sascCnpj === cnpj && t.subtipo === 'sasc_dados';
+    });
+
+    var entry = {
+      _sascCnpj:      cnpj,
+      subtipo:        'sasc_dados',
+      empresa:        cnpj,
+      periodoEstanq:  f.periodoEstanq,
+      ultimoEstanq:   f.ultimoEstanq   || null,
+      proximoEstanq:  f.proximoEstanq,
+      periodoHidro:   f.periodoHidro,
+      ultimoHidro:    f.ultimoHidro    || null,
+      proximoHidro:   f.proximoHidro,
+      dataInstalacao: f.dataInstalacao || null,
+      vidaUtil:       parseInt(f.vidaUtil) || 25,
+      prazoRemocao:   f.prazoRemocao,
+    };
+
+    if (idx >= 0) {
+      CTRL.tanques[idx] = Object.assign(CTRL.tanques[idx], entry);
+    } else {
+      CTRL.tanques.push(entry);
+    }
+
+    changes++; save(); renderCtrl();
+    toast('✅ Dados SASC salvos', 'success');
+  } catch(e) {
+    console.error('[SASC] sascSalvar erro:', e);
+    toast('Erro ao salvar SASC: ' + e.message, 'error');
+  }
+}
+
+// ── Renderiza o bloco SASC dentro de renderPInfo ──────────────────
+function _renderSascBlock(r) {
+  try {
+    if (!_isPosto(r)) return '';
+    var cnpj = _empKey(r);
+    if (!CTRL || !CTRL.tanques) CTRL = Object.assign(CTRL || {}, { tanques: [] });
+
+    // Recupera dados SASC salvos para esta empresa
+    var saved = CTRL.tanques.find(function(t) {
+      return t._sascCnpj === cnpj && t.subtipo === 'sasc_dados';
+    }) || {};
+
+    var fmtVal = function(v) { return v || ''; };
+    var fmtShow = function(v) {
+      if (!v) return '<span style="color:var(--text4)">—</span>';
+      var p = v.split('-'); return p[2]+'/'+p[1]+'/'+p[0];
+    };
+    var dias = function(v) {
+      if (!v) return '';
+      var d = Math.round((new Date(v + 'T00:00:00') - new Date()) / 86400000);
+      if (d < 0) return '<span style="color:var(--red);font-size:10px"> (' + Math.abs(d) + 'd vencido)</span>';
+      if (d <= 30) return '<span style="color:var(--yellow);font-size:10px"> (+' + d + 'd)</span>';
+      return '<span style="color:var(--g2);font-size:10px"> (+' + d + 'd)</span>';
+    };
+
+    var cid = CSS.escape ? CSS.escape(cnpj) : cnpj.replace(/[^a-zA-Z0-9]/g, '_');
+
+    return '<div class="sasc-block" style="margin-top:12px;border:1px solid var(--border);border-radius:8px;overflow:hidden">' +
+      '<div style="background:rgba(56,189,248,.1);padding:8px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)">' +
+        '<span style="font-size:14px">⛽</span>' +
+        '<span style="font-weight:700;font-size:12px;color:var(--cyan)">SASC — Dados de Controle Ambiental</span>' +
+        '<button class="btn btn-ghost btn-xs" style="margin-left:auto" onclick="document.getElementById(\'sasc-form-' + cid + '\').style.display=document.getElementById(\'sasc-form-' + cid + '\').style.display===\'none\'?\'block\':\'none\'">✏️ Editar</button>' +
+      '</div>' +
+
+      // Resumo dos dados salvos
+      '<div style="padding:10px 12px;display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;font-size:11px">' +
+        '<div><span style="color:var(--text3)">Último Estanqueidade:</span> ' + fmtShow(saved.ultimoEstanq) + '</div>' +
+        '<div><span style="color:var(--text3)">Próximo Estanqueidade:</span> ' + fmtShow(saved.proximoEstanq) + dias(saved.proximoEstanq) + '</div>' +
+        '<div><span style="color:var(--text3)">Último Hidrostático:</span> ' + fmtShow(saved.ultimoHidro) + '</div>' +
+        '<div><span style="color:var(--text3)">Próximo Hidrostático:</span> ' + fmtShow(saved.proximoHidro) + dias(saved.proximoHidro) + '</div>' +
+        '<div><span style="color:var(--text3)">Instalação Tanques:</span> ' + fmtShow(saved.dataInstalacao) + '</div>' +
+        '<div><span style="color:var(--text3)">Remoção (prazo):</span> ' + fmtShow(saved.prazoRemocao) + dias(saved.prazoRemocao) + '</div>' +
+      '</div>' +
+
+      // Formulário de edição (oculto por padrão)
+      '<div id="sasc-form-' + cid + '" style="display:none;padding:12px;border-top:1px solid var(--border)">' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
+
+          '<div style="grid-column:1/-1;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text4);margin-bottom:2px">🔵 Estanqueidade</div>' +
+
+          '<div><label style="font-size:10px;color:var(--text3)">Periodicidade</label>' +
+            '<select id="sasc-periodo-estanq-' + cnpj + '" style="width:100%;background:var(--s2);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:4px 6px;font-size:11px">' +
+              '<option value="">Selecione…</option>' +
+              ['mensal','trimestral','semestral','anual','bienal','trienal','quinquenal'].map(function(p) {
+                return '<option value="' + p + '"' + (saved.periodoEstanq === p ? ' selected' : '') + '>' + p.charAt(0).toUpperCase() + p.slice(1) + '</option>';
+              }).join('') +
+            '</select></div>' +
+
+          '<div><label style="font-size:10px;color:var(--text3)">Último Teste</label>' +
+            '<input type="date" id="sasc-ultimo-estanq-' + cnpj + '" value="' + fmtVal(saved.ultimoEstanq) + '" style="width:100%;background:var(--s2);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:4px 6px;font-size:11px"></div>' +
+
+          '<div style="grid-column:1/-1;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text4);margin:6px 0 2px">💧 Hidrostático</div>' +
+
+          '<div><label style="font-size:10px;color:var(--text3)">Periodicidade</label>' +
+            '<select id="sasc-periodo-hidro-' + cnpj + '" style="width:100%;background:var(--s2);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:4px 6px;font-size:11px">' +
+              '<option value="">Selecione…</option>' +
+              ['mensal','trimestral','semestral','anual','bienal','trienal','quinquenal'].map(function(p) {
+                return '<option value="' + p + '"' + (saved.periodoHidro === p ? ' selected' : '') + '>' + p.charAt(0).toUpperCase() + p.slice(1) + '</option>';
+              }).join('') +
+            '</select></div>' +
+
+          '<div><label style="font-size:10px;color:var(--text3)">Último Teste</label>' +
+            '<input type="date" id="sasc-ultimo-hidro-' + cnpj + '" value="' + fmtVal(saved.ultimoHidro) + '" style="width:100%;background:var(--s2);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:4px 6px;font-size:11px"></div>' +
+
+          '<div style="grid-column:1/-1;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text4);margin:6px 0 2px">⛽ Tanques</div>' +
+
+          '<div><label style="font-size:10px;color:var(--text3)">Data de Instalação</label>' +
+            '<input type="date" id="sasc-data-install-' + cnpj + '" value="' + fmtVal(saved.dataInstalacao) + '" style="width:100%;background:var(--s2);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:4px 6px;font-size:11px"></div>' +
+
+          '<div><label style="font-size:10px;color:var(--text3)">Vida Útil (anos)</label>' +
+            '<input type="number" id="sasc-vida-util-' + cnpj + '" value="' + (saved.vidaUtil || 25) + '" min="1" max="50" style="width:100%;background:var(--s2);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:4px 6px;font-size:11px"></div>' +
+
+          '<div style="grid-column:1/-1;display:flex;justify-content:flex-end;gap:6px;margin-top:6px">' +
+            '<button class="btn btn-ghost btn-xs" onclick="document.getElementById(\'sasc-form-' + cid + '\').style.display=\'none\'">Cancelar</button>' +
+            '<button class="btn btn-primary btn-xs" onclick="sascSalvar(\'' + cnpj.replace(/'/g, "\\'") + '\')">💾 Salvar SASC</button>' +
+          '</div>' +
+
+        '</div>' +
+      '</div>' +
+    '</div>';
+  } catch(e) {
+    console.error('[SASC] _renderSascBlock erro:', e);
+    return '';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// MÓDULO PDF LICENÇA — Importação e preenchimento automático
+// ═══════════════════════════════════════════════════════════════════
+
+// ── Processa o PDF da licença e preenche dados automaticamente ────
+async function sascImportarLicenca(file, idx) {
+  try {
+    if (!file || file.type !== 'application/pdf') {
+      toast('Selecione um arquivo PDF válido', 'error');
+      return;
+    }
+    toast('⏳ Lendo PDF da licença...', 'info');
+
+    var texto = await extractIatPdfText(file).catch(function(e) {
+      console.warn('[SASC] Fallback texto simples:', e);
+      return null;
+    });
+
+    if (!texto) {
+      // Fallback: leitura simples com pdf.js
+      var buf = await file.arrayBuffer();
+      var pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+      var partes = [];
+      for (var p = 1; p <= pdf.numPages; p++) {
+        var page = await pdf.getPage(p);
+        var tc = await page.getTextContent();
+        partes.push(tc.items.map(function(i) { return i.str; }).join(' '));
+      }
+      texto = partes.join('\n');
+    }
+
+    var r = DATA[idx] || {};
+
+    // ── Extrai dados gerais ────────────────────────────────────────
+    var meta = _sascExtrairMeta(texto);
+
+    // Preenche campos editáveis do registro se vazios
+    var changed = false;
+    if (meta.empresa && !r.empresa) { r.empresa = meta.empresa; changed = true; }
+    if (meta.cnpj    && !r.cnpj)    { r.cnpj    = meta.cnpj;    changed = true; }
+    if (meta.municipio && !r.municipio) { r.municipio = meta.municipio; changed = true; }
+
+    // Atualiza DATA e LICHI com dados da licença
+    if (meta.numLicenca || meta.validade) {
+      var cnpjKey = _empKey(r);
+      if (!LICHI[cnpjKey]) LICHI[cnpjKey] = [];
+      var licEntry = LICHI[cnpjKey].find(function(l) {
+        return l.numLicenca === meta.numLicenca && meta.numLicenca;
+      });
+      if (!licEntry) {
+        LICHI[cnpjKey].unshift({
+          modalidade:     r.modalidade || '',
+          situacao:       r.situacao   || '',
+          dataEmissao:    meta.dataEmissao    || '',
+          dataVencimento: meta.validade       || r.validade || '',
+          prazoAdequacao: '',
+          numLicenca:     meta.numLicenca     || '',
+          numProcesso:    meta.numProcesso    || '',
+          observacoes:    '',
+          _fromPdf:       true
+        });
+      }
+      if (meta.validade) { r.validade = meta.validade; changed = true; }
+    }
+
+    if (changed) { DATA[idx] = r; }
+
+    // ── Extrai e injeta dados ambientais ──────────────────────────
+    var cnpjKey = _empKey(r);
+    if (!ENV[cnpjKey]) ENV[cnpjKey] = { agua: [], efluente: [], residuo: [] };
+
+    var ambiental = _sascExtrairAmbiental(texto);
+    var injections = 0;
+
+    // Água
+    (ambiental.agua || []).forEach(function(a) {
+      var existe = ENV[cnpjKey].agua.some(function(x) {
+        return x.origem === a.origem && x.uso === a.uso;
+      });
+      if (!existe) { ENV[cnpjKey].agua.push(a); injections++; }
+    });
+
+    // Efluente
+    (ambiental.efluente || []).forEach(function(e) {
+      var existe = ENV[cnpjKey].efluente.some(function(x) {
+        return x.origem === e.origem && x.tratamento === e.tratamento;
+      });
+      if (!existe) { ENV[cnpjKey].efluente.push(e); injections++; }
+    });
+
+    // Resíduo
+    (ambiental.residuo || []).forEach(function(res) {
+      var existe = ENV[cnpjKey].residuo.some(function(x) {
+        return x.codigo === res.codigo && x.descricao === res.descricao;
+      });
+      if (!existe) { ENV[cnpjKey].residuo.push(res); injections++; }
+    });
+
+    // ── Extrai condicionantes/prazos SASC ──────────────────────────
+    var prazosSasc = _sascExtrairPrazosSasc(texto);
+    if (prazosSasc.estanqueidade || prazosSasc.hidrostatico) {
+      // Preenche o formulário SASC se estiver visível
+      var cid = cnpjKey;
+      var selEstanq = document.getElementById('sasc-periodo-estanq-' + cid);
+      var selHidro  = document.getElementById('sasc-periodo-hidro-'  + cid);
+      if (selEstanq && prazosSasc.estanqueidade) selEstanq.value = prazosSasc.estanqueidade;
+      if (selHidro  && prazosSasc.hidrostatico)  selHidro.value  = prazosSasc.hidrostatico;
+    }
+
+    changes++; save();
+    var msg = '✅ Licença importada';
+    if (meta.numLicenca) msg += ' — Licença ' + meta.numLicenca;
+    if (injections) msg += ' · ' + injections + ' dados ambientais adicionados';
+    toast(msg, 'success');
+
+    // Re-renderiza abas afetadas
+    var activeIdx = DATA.findIndex(function(d) { return d._id === selectedId; });
+    if (activeIdx >= 0) {
+      if (activeTab === 'info') renderPInfo(activeIdx);
+      if (activeTab === 'amb')  renderPAmb(activeIdx);
+      if (activeTab === 'lics') renderPLicencas(activeIdx);
+    }
+    renderTable();
+
+  } catch(e) {
+    console.error('[SASC] sascImportarLicenca erro:', e);
+    toast('Erro ao importar PDF: ' + e.message, 'error');
+  }
+}
+
+// ── Extrai metadados gerais do texto da licença ───────────────────
+function _sascExtrairMeta(texto) {
+  var meta = {};
+  try {
+    var t = texto || '';
+
+    // Razão Social
+    var mEmp = t.match(/(?:Raz[aã]o\s+Social|Nome\s+(?:do\s+)?Empreendedor)[:\s]+([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ][^\n]{3,80})/i);
+    if (mEmp) meta.empresa = mEmp[1].trim().replace(/\s+/g, ' ');
+
+    // CNPJ
+    var mCnpj = t.match(/CNPJ[:\s]+(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})/i);
+    if (mCnpj) meta.cnpj = mCnpj[1].replace(/[^\d./\-]/g, '');
+
+    // Município
+    var mMun = t.match(/Munic[ií]pio[:\s]+([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ][^\n,]{2,40})/i);
+    if (!mMun) mMun = t.match(/([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ][a-záéíóúàâêôãõç\s]{3,30})\s*[-,]\s*PR\b/);
+    if (mMun) meta.municipio = mMun[1].trim();
+
+    // Número da licença
+    var mNum = t.match(/(?:N[uú]mero|N[oº]\.?)\s*(?:da\s+)?(?:[Ll]icen[çc]a|LO|LP|LI|RLO)\s*[:\-]?\s*(\d+)/i);
+    if (!mNum) mNum = t.match(/(?:LO|LP|LI|RLO|DLAM|DLAE)\s*n[oº]?\s*[:\-]?\s*(\d+)/i);
+    if (mNum) meta.numLicenca = mNum[1];
+
+    // Número do processo
+    var mProc = t.match(/[Pp]rocesso\s*[:\-]?\s*(\d[\d.\-/]+)/);
+    if (mProc) meta.numProcesso = mProc[1];
+
+    // Validade
+    var mVal = t.match(/[Vv]alidade\s+(?:da\s+[Ll]icen[çc]a\s*)?[:\-]?\s*(\d{2}\/\d{2}\/\d{4})/);
+    if (!mVal) mVal = t.match(/v[aá]lida\s+at[eé]\s+(\d{2}\/\d{2}\/\d{4})/i);
+    if (mVal) {
+      var p = mVal[1].split('/');
+      meta.validade = p[2] + '-' + p[1].padStart(2,'0') + '-' + p[0].padStart(2,'0');
+    }
+
+    // Data de Emissão
+    var mEmis = t.match(/[Ee]miss[aã]o[:\s]+(\d{2}\/\d{2}\/\d{4})/);
+    if (!mEmis) mEmis = t.match(/[Ee]mitida?\s+em[:\s]+(\d{2}\/\d{2}\/\d{4})/i);
+    if (mEmis) {
+      var pe = mEmis[1].split('/');
+      meta.dataEmissao = pe[2] + '-' + pe[1].padStart(2,'0') + '-' + pe[0].padStart(2,'0');
+    }
+  } catch(e) { console.warn('[SASC] _sascExtrairMeta:', e); }
+  return meta;
+}
+
+// ── Extrai dados ambientais (água, efluente, resíduo) ─────────────
+function _sascExtrairAmbiental(texto) {
+  var result = { agua: [], efluente: [], residuo: [] };
+  try {
+    var t = texto || '';
+
+    // ── Água ──────────────────────────────────────────────────────
+    // Detecta Poço Artesiano / Rede Pública
+    if (/po[çc]o\s*artesiano|po[çc]o\s*tubular|po[çc]o\s*semi|captaç.*subterr/i.test(t)) {
+      var volPoco = (t.match(/po[çc]o[^\n]{0,100}(\d+[,.]\d*)\s*m[³3]\/h/i) || [])[1] || '';
+      result.agua.push({
+        origem: 'Poço Artesiano',
+        uso: 'Abastecimento / Uso Geral',
+        volume: volPoco.replace(',', '.') || '',
+        utmN: '', utmE: ''
+      });
+    }
+    if (/rede\s*p[úu]blica|sabepar|sanepar|companhia\s*de\s*saneamento/i.test(t)) {
+      result.agua.push({
+        origem: 'Rede Pública',
+        uso: 'Abastecimento / Uso Geral',
+        volume: '', utmN: '', utmE: ''
+      });
+    }
+
+    // ── Efluente ──────────────────────────────────────────────────
+    // Caixa Separadora Água-Óleo (CSAO)
+    if (/caixa\s*separadora|CSAO|separador\s*[áa]gua[- ]?[óo]leo/i.test(t)) {
+      var destCSAO = /rede\s*coletora|galeria|pluvial/i.test(t) ? 'Galeria pluvial' :
+                     /solo|infiltraç/i.test(t) ? 'Solo (infiltração)' : 'Rede coletora';
+      result.efluente.push({
+        origem: 'Área de abastecimento / pista',
+        tratamento: 'Caixa Separadora Água-Óleo (CSAO)',
+        destino: destCSAO,
+        vazao: ''
+      });
+    }
+    // Fossa séptica / sanitário
+    if (/fossa\s*s[ée]ptica|banheiro|sanit[áa]rio|efluente\s*dom[ée]stico/i.test(t)) {
+      result.efluente.push({
+        origem: 'Banheiro / Área administrativa',
+        tratamento: 'Fossa Séptica',
+        destino: 'Solo (sumidouro)',
+        vazao: ''
+      });
+    }
+    // ETE
+    if (/ETE[-\s]?P|esta[çc][aã]o\s*de\s*tratamento/i.test(t)) {
+      result.efluente.push({
+        origem: 'Área operacional',
+        tratamento: 'ETE-P',
+        destino: 'Corpo hídrico / Galeria',
+        vazao: ''
+      });
+    }
+
+    // ── Resíduos ──────────────────────────────────────────────────
+    // Resíduos contaminados (padrão postos)
+    var residPadroes = [
+      { re: /borra\s*de\s*[óo]leo|borra\s*de\s*combust|res[íi]duo\s*oleoso/i,
+        codigo: '13 05 03', descricao: 'Borra de óleo / resíduo oleoso', destinacao: 'Empresa licenciada' },
+      { re: /filtro\s*de\s*[óo]leo|filtros?\s*usados?/i,
+        codigo: '16 01 07', descricao: 'Filtros de óleo usados', destinacao: 'Empresa licenciada' },
+      { re: /trapo|pano\s*contaminado|material\s*absorvente/i,
+        codigo: '15 02 02', descricao: 'Trapos e materiais absorventes contaminados', destinacao: 'Empresa licenciada' },
+      { re: /res[íi]duo\s*comum|lixo\s*comum|res[íi]duo\s*dom[ée]stico/i,
+        codigo: '20 03 01', descricao: 'Resíduo sólido urbano / comum', destinacao: 'Coleta municipal' },
+    ];
+    residPadroes.forEach(function(rp) {
+      if (rp.re.test(t)) {
+        var qtd = (t.match(new RegExp(rp.re.source + '[^\\n]{0,60}(\\d+[,.]?\\d*)\\s*(?:kg|L|m[³3])', 'i')) || [])[1] || '';
+        result.residuo.push({
+          codigo: rp.codigo,
+          descricao: rp.descricao,
+          quantidade: qtd.replace(',', '.'),
+          unidade: 'kg/mês',
+          destinacao: rp.destinacao
+        });
+      }
+    });
+
+  } catch(e) { console.warn('[SASC] _sascExtrairAmbiental:', e); }
+  return result;
+}
+
+// ── Extrai periodicidades SASC das condicionantes ─────────────────
+function _sascExtrairPrazosSasc(texto) {
+  var result = {};
+  try {
+    var t = texto || '';
+
+    // Estanqueidade
+    if (/bienal.*?estanqueidade|estanqueidade.*?bienal|a\s+cada\s+2\s+anos.*?estanqueidade/i.test(t))
+      result.estanqueidade = 'bienal';
+    else if (/anual.*?estanqueidade|estanqueidade.*?anual/i.test(t))
+      result.estanqueidade = 'anual';
+    else if (/semestral.*?estanqueidade|estanqueidade.*?semestral/i.test(t))
+      result.estanqueidade = 'semestral';
+
+    // Hidrostático
+    if (/anual.*?hidrost[áa]tico|hidrost[áa]tico.*?anual/i.test(t))
+      result.hidrostatico = 'anual';
+    else if (/semestral.*?hidrost[áa]tico|hidrost[áa]tico.*?semestral/i.test(t))
+      result.hidrostatico = 'semestral';
+    else if (/bienal.*?hidrost[áa]tico|hidrost[áa]tico.*?bienal/i.test(t))
+      result.hidrostatico = 'bienal';
+
+  } catch(e) { console.warn('[SASC] _sascExtrairPrazosSasc:', e); }
+  return result;
 }
 
 
