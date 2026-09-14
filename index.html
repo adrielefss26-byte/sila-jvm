@@ -3561,7 +3561,7 @@ function addHist(cnpj,idx){
   const proc=document.getElementById('h-proc').value.trim()||null;
   const obs=document.getElementById('h-obs').value.trim()||null;
   if(!data){toast('Informe a data do registro','error');return;}
-  const realCnpj=DATA[idx].cnpj;
+  const realCnpj=_empKey(DATA[idx]); // chave correta para COND
   if(!HIST[realCnpj])HIST[realCnpj]=[];
   HIST[realCnpj].push({data,tipo,validadeAnterior:valAnt,validadeNova:valNova,modalidadeAnterior:modAnt,modalidadeNova:modNova,numProcesso:proc,obs,registradoEm:new Date().toISOString()});
   // Se tiver nova validade, atualizar o registro principal também
@@ -3579,7 +3579,7 @@ function addHist(cnpj,idx){
 }
 
 function delHist(cnpj,i,idx){
-  const realCnpj=DATA[idx].cnpj;
+  const realCnpj=_empKey(DATA[idx]); // chave correta para COND
   if(!HIST[realCnpj])return;
   HIST[realCnpj].splice(i,1);
   changes++;save();
@@ -3590,7 +3590,7 @@ function delHist(cnpj,i,idx){
 }
 
 function addComp(ec,idx){
-  const realCnpj=DATA[idx].cnpj;
+  const realCnpj=_empKey(DATA[idx]); // chave correta para COND
   const desc=document.getElementById('nc-comp-desc').value.trim();
   if(!desc){toast('Descreva o que foi complementado','error');return;}
   if(!COMP[realCnpj])COMP[realCnpj]=[];
@@ -3609,7 +3609,7 @@ function addComp(ec,idx){
 }
 
 function delComp(ec,i,idx){
-  const realCnpj=DATA[idx].cnpj;
+  const realCnpj=_empKey(DATA[idx]); // chave correta para COND
   if(!COMP[realCnpj])return;
   COMP[realCnpj].splice(i,1);
   changes++;save();renderPHist(idx);
@@ -3622,7 +3622,7 @@ function toggleCompEdit(ec,i){
 }
 
 function saveCompEdit(ec,i,idx){
-  const realCnpj=DATA[idx].cnpj;
+  const realCnpj=_empKey(DATA[idx]); // chave correta para COND
   const desc=document.getElementById('cede-'+ec+'-'+i).value.trim();
   if(!desc){toast('Informe a descrição','error');return;}
   COMP[realCnpj][i]={
@@ -3645,7 +3645,7 @@ function toggleHistEdit(ec,i){
 }
 
 function saveHistEdit(ec,i,idx){
-  const realCnpj=DATA[idx].cnpj;
+  const realCnpj=_empKey(DATA[idx]); // chave correta para COND
   const data=document.getElementById('hed-'+ec+'-'+i).value;
   if(!data){toast('Informe a data','error');return;}
   const valNova=document.getElementById('hev-'+ec+'-'+i).value||null;
@@ -3826,7 +3826,7 @@ function renderPCond(idx){
 function addCond(ec,idx){
   const texto=document.getElementById('nc-texto').value.trim();
   if(!texto){toast('Descreva a condicionante','error');return;}
-  const realCnpj=DATA[idx].cnpj;
+  const realCnpj=_empKey(DATA[idx]); // chave correta para COND
   if(!COND[realCnpj])COND[realCnpj]=[];
   COND[realCnpj].push({
     texto,
@@ -4297,7 +4297,7 @@ function aiCancelPreview(idx){
 function aiConfirmSave(idx,ec){
   const list=_aiPreviews[idx];
   if(!list||list.length===0){toast('Nenhuma condicionante para salvar','error');return;}
-  const realCnpj=DATA[idx].cnpj;
+  const realCnpj=_empKey(DATA[idx]); // chave correta para COND
   if(!COND[realCnpj])COND[realCnpj]=[];
   const dataEmissao=(_aiMetadata[idx]||{}).dataEmissao||null;
   let adicionadas=0,calculos=0;
@@ -4332,7 +4332,7 @@ function aiConfirmSave(idx,ec){
 }
 
 function updCondStatus(ec,i,val,sel,idx){
-  const realCnpj=DATA[idx].cnpj;
+  const realCnpj=_empKey(DATA[idx]); // chave correta para COND
   COND[realCnpj][i].status=val;
   sel.className='cond-status-sel '+(val==='Cumprida'?'sc':val==='N/A'?'sn':'sp');
   changes++;save();
@@ -4358,11 +4358,13 @@ function toggleCondEdit(ec,i){
 }
 
 function saveCondEdit(ec,i,idx){
-  const realCnpj=DATA[idx].cnpj;
+  const r=DATA[idx];
+  const key=_empKey(r);  // chave correta: CNPJ::atividade
   const texto=document.getElementById('cond-et-'+ec+'-'+i).value.trim();
   if(!texto){toast('O texto não pode estar vazio','error');return;}
-  COND[realCnpj][i]={
-    ...COND[realCnpj][i],
+  if(!COND[key]||!COND[key][i]){toast('Erro: condicionante não encontrada','error');return;}
+  COND[key][i]={
+    ...COND[key][i],
     texto,
     numero:document.getElementById('cond-en-'+ec+'-'+i).value.trim(),
     tipo:document.getElementById('cond-etp-'+ec+'-'+i).value,
@@ -4582,7 +4584,7 @@ function toggleAmbForm(id){
 }
 
 function addAmb(ec,tipo,idx){
-  const realCnpj=DATA[idx].cnpj;
+  const realCnpj=_empKey(DATA[idx]); // chave correta para COND
   if(!ENV[realCnpj])ENV[realCnpj]={agua:[],efluente:[],residuo:[]};
   const d=ENV[realCnpj];
 
@@ -4625,7 +4627,7 @@ function addAmb(ec,tipo,idx){
 }
 
 function delAmb(ec,tipo,i,idx){
-  const realCnpj=DATA[idx].cnpj;
+  const realCnpj=_empKey(DATA[idx]); // chave correta para COND
   if(!ENV[realCnpj])return;
   ENV[realCnpj][tipo].splice(i,1);
   changes++;save();renderPAmb(idx);toast('Removido','info');
@@ -4633,7 +4635,7 @@ function delAmb(ec,tipo,i,idx){
 
 function editAmb(ec,tipo,i,idx){
   // simple: delete and open form pre-filled — rebuild form
-  const realCnpj=DATA[idx].cnpj;
+  const realCnpj=_empKey(DATA[idx]); // chave correta para COND
   const item=ENV[realCnpj][tipo][i];
   ENV[realCnpj][tipo].splice(i,1);
   changes++;save();renderPAmb(idx);
