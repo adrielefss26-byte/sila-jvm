@@ -678,29 +678,29 @@ td.c-atv{max-width:120px;overflow:hidden;text-overflow:ellipsis}
    ═══════════════════════════════════════════════════════════ */
 #relModal{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9100;display:none;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto}
 #relModal.open{display:flex}
-#relBox{background:var(--bg2);border:1px solid var(--border);border-radius:12px;width:100%;max-width:1200px;min-height:80vh;display:flex;flex-direction:column}
+#relBox{background:var(--bg2,#1a1a2e);border:1px solid var(--border,#333);border-radius:12px;width:100%;max-width:1200px;min-height:80vh;display:flex;flex-direction:column;color:var(--text,#e2e8f0)}
 .rel-hdr{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border);flex-shrink:0}
 .rel-hdr h2{margin:0;font-size:15px;font-weight:700;color:var(--cyan);flex:1}
 .rel-body{display:flex;flex:1;min-height:0}
-.rel-sidebar{width:220px;flex-shrink:0;border-right:1px solid var(--border);padding:12px 8px;overflow-y:auto}
+.rel-sidebar{width:220px;flex-shrink:0;border-right:1px solid var(--border,#333);padding:12px 8px;overflow-y:auto;background:var(--bg,#0f0f23);color:var(--text,#e2e8f0)}
 .rel-sidebar h4{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text4);margin:12px 8px 4px}
 .rel-menu-item{display:block;width:100%;text-align:left;padding:7px 10px;border-radius:6px;border:none;background:transparent;color:var(--text);font-size:12px;cursor:pointer;transition:background .15s}
 .rel-menu-item:hover{background:var(--s3)}
 .rel-menu-item.active{background:rgba(103,232,249,.15);color:var(--cyan);font-weight:600}
-.rel-content{flex:1;display:flex;flex-direction:column;overflow:hidden}
-.rel-filters{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;flex-shrink:0}
-.rel-filters select,.rel-filters input{background:var(--s2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:5px 8px;font-size:12px}
+.rel-content{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--bg2,#1a1a2e)}
+.rel-filters{padding:12px 16px;border-bottom:1px solid var(--border,#333);display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;flex-shrink:0;background:var(--bg2,#1a1a2e)}
+.rel-filters select,.rel-filters input{background:var(--s2,#16213e);border:1px solid var(--border,#4a5568);border-radius:6px;color:var(--text,#e2e8f0);padding:5px 8px;font-size:12px}
 .rel-filters label{font-size:10px;color:var(--text4);display:block;margin-bottom:2px}
 .rel-actions{display:flex;gap:6px;margin-left:auto;align-items:flex-end}
-.rel-output{flex:1;overflow-y:auto;padding:16px}
-.rel-summary{background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12px}
+.rel-output{flex:1;overflow-y:auto;padding:16px;background:var(--bg2,#1a1a2e);color:var(--text,#e2e8f0)}
+.rel-summary{background:var(--s2,#16213e);border:1px solid var(--border,#2d3748);border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:12px;color:var(--text,#e2e8f0)}
 .rel-summary h3{margin:0 0 6px;font-size:13px;color:var(--cyan)}
 .rel-summary-grid{display:flex;flex-wrap:wrap;gap:8px 20px;color:var(--text3)}
 .rel-summary-pill{background:var(--s3);border-radius:20px;padding:2px 10px;font-size:11px;color:var(--text)}
 .rel-table-wrap{overflow-x:auto}
-.rel-table{width:100%;border-collapse:collapse;font-size:12px}
+.rel-table{width:100%;border-collapse:collapse;font-size:12px;background:var(--bg2,#1a1a2e);color:var(--text,#e2e8f0)}
 .rel-table th{background:var(--s3);color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:7px 10px;text-align:left;position:sticky;top:0;z-index:1;white-space:nowrap}
-.rel-table td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top;color:var(--text)}
+.rel-table td{padding:7px 10px;border-bottom:1px solid var(--border,#2d3748);vertical-align:top;color:var(--text,#e2e8f0);background:transparent}
 .rel-table tr:hover td{background:var(--s2)}
 .rel-table .empresa-nome{font-weight:600;color:var(--text)}
 .rel-table .cnpj{font-family:var(--mono);font-size:11px;color:var(--text3)}
@@ -731,6 +731,8 @@ td.c-atv{max-width:120px;overflow:hidden;text-overflow:ellipsis}
 }
 
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 <body>
 
@@ -8972,35 +8974,44 @@ function relGerarAtividade(f) {
 
 // ── Exportar PDF (via print) ────────────────────────────────────
 function relGerarPDF() {
+  // Gera PDF via impressão automática em nova aba (mantém compatibilidade)
   try {
-    var title = document.getElementById('relModTitle').textContent;
+    var title = document.getElementById('relModTitle').textContent || 'Relatório';
     var body  = document.getElementById('relOutput').innerHTML;
-    var hoje  = REF.toLocaleDateString('pt-BR', {day:'2-digit', month:'long', year:'numeric'});
+    var hoje  = new Date().toLocaleDateString('pt-BR', {day:'2-digit', month:'long', year:'numeric'});
     var w = window.open('', '_blank');
+    if (!w) { toast('Permita popups para gerar o PDF','warn'); return; }
     w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+title+'</title><style>' +
-      'body{font-family:Arial,sans-serif;font-size:12px;color:#111;margin:20px}' +
-      'h1{font-size:16px;margin:0 0 4px}p.sub{color:#555;font-size:11px;margin:0 0 14px}' +
+      'body{font-family:Arial,sans-serif;font-size:12px;color:#111;margin:20px;background:#fff}' +
+      'h1{font-size:16px;margin:0 0 4px;color:#1a365d}p.sub{color:#555;font-size:11px;margin:0 0 14px}' +
+      '.no-print{display:none}' +
       'table{width:100%;border-collapse:collapse;margin-top:10px}' +
-      'th{background:#f0f0f0;font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:6px 8px;text-align:left;border:1px solid #ccc}' +
-      'td{padding:6px 8px;border:1px solid #ddd;font-size:11px;vertical-align:top}' +
-      'tr:nth-child(even) td{background:#fafafa}' +
-      '.rel-summary{background:#f8f8f8;border:1px solid #ccc;padding:10px;margin-bottom:12px;border-radius:4px}' +
-      '.rel-summary h3{margin:0 0 4px;font-size:13px}' +
-      '.rel-summary-grid{font-size:11px;color:#555}' +
-      '.rpill{display:inline-block;padding:1px 6px;border-radius:10px;font-size:10px;font-weight:600}' +
+      'th{background:#e8f4fd;font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:6px 8px;text-align:left;border:1px solid #aec9e0;color:#1a365d}' +
+      'td{padding:6px 8px;border:1px solid #dde;font-size:11px;vertical-align:top;color:#222;background:#fff}' +
+      'tr:nth-child(even) td{background:#f7fbff}' +
+      '.rel-summary{background:#f0f7ff;border:1px solid #aec9e0;padding:10px 14px;margin-bottom:14px;border-radius:4px}' +
+      '.rel-summary h3{margin:0 0 6px;font-size:13px;color:#1a365d}' +
+      '.rel-summary-grid{font-size:11px;color:#444;display:flex;flex-wrap:wrap;gap:8px 20px}' +
+      '.rel-table-wrap{overflow:visible}' +
+      '.rpill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600}' +
       '.rpill-ok{background:#d1fae5;color:#065f46}.rpill-warn{background:#fef3c7;color:#92400e}' +
       '.rpill-err{background:#fee2e2;color:#991b1b}.rpill-info{background:#dbeafe;color:#1e40af}.rpill-neu{background:#f3f4f6;color:#374151}' +
-      '.rel-cond-grupo h4{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#555;margin:14px 0 4px;border-bottom:1px solid #ccc;padding-bottom:2px}' +
-      '.empresa-nome{font-weight:600}.cnpj{font-family:monospace}.mun{color:#555}' +
-      '@page{margin:15mm}' +
+      '.rel-cond-grupo{margin-bottom:16px}.rel-cond-grupo h4{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#555;margin:14px 0 4px;border-bottom:1px solid #ccc;padding-bottom:2px}' +
+      '.empresa-nome{font-weight:700;color:#1a365d}.cnpj{font-family:monospace;color:#444}.mun{color:#555}' +
+      '.rel-empty{text-align:center;padding:40px;color:#666}' +
+      '.rel-group-hdr td{background:#e8f4fd!important;font-weight:700;color:#1a365d!important;font-size:11px;text-transform:uppercase}' +
+      '@page{margin:15mm;size:A4}' +
+      '@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}' +
       '</style></head><body>' +
-      '<h1>'+title+'</h1>' +
-      '<p class="sub">JVM AmbientAgro — Emitido em '+hoje+'</p>' +
+      '<table style="width:100%;margin-bottom:12px;border:none"><tr>' +
+      '<td style="border:none;padding:0"><h1 style="margin:0">'+title+'</h1>' +
+      '<p style="margin:4px 0 0;font-size:11px;color:#555">JVM AmbientAgro — Emitido em '+hoje+'</p></td>' +
+      '</tr></table>' +
       body +
+      '<script>window.onload=function(){setTimeout(function(){window.print();},300);}<\/script>' +
       '</body></html>');
     w.document.close();
-    setTimeout(function(){ w.print(); }, 400);
-  } catch(e) { console.error('[REL] PDF:', e); toast('Erro ao gerar PDF','error'); }
+  } catch(e) { console.error('[REL] PDF:', e); toast('Erro ao gerar PDF: '+e.message,'error'); }
 }
 
 // ── Exportar Excel ───────────────────────────────────────────────
