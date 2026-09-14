@@ -9101,64 +9101,68 @@ function extrairDadosLicencaIAT(textoPdf) {
     condicionantes: { estanqueidade: '', hidrostatico: '', analiseCSAO: '', analisePoco: '' }
   };
   try {
-    var t = textoPdf || '';
+    var t = (textoPdf || '').replace(/EM BRANCO/gi, ' ').replace(/\s{3,}/g, '  ');
 
-    // 1. SUBITEM 3.1 — delimitado entre "3.1 TANQUE DE COMBUSTÍVEL" e "3.2 ÁGUA"
-    var blocoTanque = '';
+    // ── 1. BLOCO 3.1 — delimitado entre "3.1 TANQUE DE COMBUSTÍVEL" e "3.2 ÁGUA" ──────
+    var bloco31 = '';
     try {
-      var p31 = t.split(/3\.1\s+TANQUE\s+DE\s+COMBUST[ÍI]VEL/i);
-      if (p31.length > 1) blocoTanque = p31[1].split(/3\.2\s+[ÁA]GUA/i)[0] || '';
-    } catch(e31) {}
-    var datasTanque = blocoTanque.match(/\b(\d{2}\/\d{2}\/\d{4})\b/g);
-    if (datasTanque && datasTanque.length > 0) {
-      var dtStr = datasTanque[0];
-      var ptD   = dtStr.split('/');
-      resultado.tanques.dataInstalacao  = dtStr; // DD/MM/AAAA
-      resultado.tanques.dataRemocaoLimite = ptD[0]+'/'+ptD[1]+'/'+(parseInt(ptD[2],10)+25);
+      var s31 = t.split(/3\.1\s+TANQUE\s+DE\s+COMBUST[ÍI]VEL/i);
+      if (s31.length > 1) bloco31 = s31[1].split(/3\.2\s+[ÁA]GUA/i)[0];
+    } catch(e31) { bloco31 = ''; }
+
+    // Extrai a primeira data DD/MM/AAAA (coluna "Data da Instalação")
+    var datas31 = bloco31.match(/\b(\d{2}\/\d{2}\/\d{4})\b/g);
+    if (datas31 && datas31.length > 0) {
+      var dtStr = datas31[0]; // ex: "01/01/2016"
+      var pt    = dtStr.split('/');
+      resultado.tanques.dataInstalacao    = dtStr;
+      resultado.tanques.dataRemocaoLimite = pt[0]+'/'+pt[1]+'/'+(parseInt(pt[2],10)+25);
     }
 
-    // 2. SUBITEM 3.6 — delimitado entre "3.6 RESÍDUOS SÓLIDOS" e "Obs.:" ou "4. CONDICIONANTES"
-    var blocoRes = '';
+    // ── 2. BLOCO 3.6 — delimitado entre "3.6 RESÍDUOS SÓLIDOS" e "Obs.:" ou "4." ─────
+    var bloco36 = '';
     try {
-      var p36 = t.split(/3\.6\s+RES[ÍI]DUOS\s+S[ÓO]LIDOS/i);
-      if (p36.length > 1) blocoRes = p36[1].split(/Obs\.\s*:|4\.\s*CONDICIONANTES/i)[0] || '';
-    } catch(e36) {}
+      var s36 = t.split(/3\.6\s+RES[ÍI]DUOS\s+S[ÓO]LIDOS/i);
+      if (s36.length > 1) bloco36 = s36[1].split(/Obs\.\s*:|4\.\s*CONDICIONANTES/i)[0];
+    } catch(e36) { bloco36 = ''; }
 
-    // Regex: 6 dígitos + traço/espaço + Descrição + Quantidade + Unidade + Destino
-    var regexRes = /(\d{6})\s*[-–]\s*(.+?)\s+([\d,]+)\s*(kg|unid|l|litros|m[³3])\s+(.+)/gi;
+    // Regex robusto — funciona com texto COM e SEM quebras de linha (padrão pdf.js IAT)
+    // Captura: 6 dígitos + traço + Descrição + Qty(virgula) + Unidade + Destino
+    // O lookahead (?=\s*\d{6}|\s*Obs\.|$) ancora cada item no próximo
+    var regexRes = /(\d{6})\s*[-–]\s*([\wÀ-ÿ][\s\S]*?)\s+([\d]+[,.][\d]+|[\d]+)\s+(kg|unid|l\b|litros|m[³3])\s+([A-ZÁÉÍÓÚÀÂÊÔÃÕ][\s\S]*?)(?=\s*\d{6}|\s*Obs\.|\s*$)/gi;
     var mRes;
-    while ((mRes = regexRes.exec(blocoRes)) !== null) {
+    while ((mRes = regexRes.exec(bloco36)) !== null) {
       try {
         var desc = (mRes[2]||'').trim().replace(/\s+/g,' ');
         var dest = (mRes[5]||'').trim().replace(/\s+/g,' ').replace(/[.,;]+$/,'');
-        if (desc.length < 3) continue;
+        if (desc.length < 2) continue;
         resultado.residuos.push({
           codIbama:       mRes[1].trim(),
           residuoIbama:   desc,
-          especifico:     desc,                          // campo obrigatório no SILA
-          quantidade:     mRes[3].trim().replace(',','.'), // schema SILA: "quantidade" (não quantDia)
+          especifico:     desc,                              // obrigatório no SILA
+          quantidade:     mRes[3].trim().replace(',','.'),  // campo "quantidade" do schema SILA
           unidade:        mRes[4].trim().toLowerCase(),
           destino:        dest,
           destinoEmpresa: dest,
           coletora:'', cnpjColetora:'', transportadora:'',
           cnpjTransp:'', cnpjDestino:'', intermediaria:'', cnpjInterm:''
         });
-      } catch(eL) {}
+      } catch(eLn) {}
     }
 
-    // Fallback linha-a-linha se regex acima não capturou (PDF com espaços extras)
+    // Fallback linha-a-linha caso o bloco tenha quebras (pdf.js com Y-delta)
     if (resultado.residuos.length === 0) {
-      blocoRes.split(/\n/).forEach(function(linha) {
+      bloco36.split(/\n/).forEach(function(linha) {
         try {
-          var mFB = linha.trim().match(/(\d{6})\s*[-–]\s*(.+?)\s+([\d,]+)\s*(kg|unid|l|litros|m[³3])\s+(.+)/i);
-          if (!mFB) return;
-          var desc = (mFB[2]||'').trim().replace(/\s+/g,' ');
-          var dest = (mFB[5]||'').trim().replace(/\s+/g,' ').replace(/[.,;]+$/,'');
-          if (desc.length < 3) return;
+          var mL = linha.trim().match(/(\d{6})\s*[-–]\s*(.+?)\s+([\d]+[,.][\d]+|[\d]+)\s*(kg|unid|l\b|litros|m[³3])\s+(.+)/i);
+          if (!mL) return;
+          var dsc = mL[2].trim().replace(/\s+/g,' ');
+          var dst = mL[5].trim().replace(/\s+/g,' ').replace(/[.,;]+$/,'');
+          if (dsc.length < 2) return;
           resultado.residuos.push({
-            codIbama: mFB[1].trim(), residuoIbama: desc, especifico: desc,
-            quantidade: mFB[3].trim().replace(',','.'), unidade: mFB[4].trim().toLowerCase(),
-            destino: dest, destinoEmpresa: dest,
+            codIbama:mL[1].trim(), residuoIbama:dsc, especifico:dsc,
+            quantidade:mL[3].trim().replace(',','.'), unidade:mL[4].trim().toLowerCase(),
+            destino:dst, destinoEmpresa:dst,
             coletora:'', cnpjColetora:'', transportadora:'',
             cnpjTransp:'', cnpjDestino:'', intermediaria:'', cnpjInterm:''
           });
@@ -9166,51 +9170,47 @@ function extrairDadosLicencaIAT(textoPdf) {
       });
     }
 
-    // 3. ITEM 4 — CONDICIONANTES
+    // ── 3. BLOCO 4. CONDICIONANTES ─────────────────────────────────────────────────────
     var blocoC = '';
     try {
-      var p4 = t.split(/4\.\s*CONDICIONANTES/i);
-      if (p4.length > 1) blocoC = p4[1];
-    } catch(e4) {}
+      var s4 = t.split(/4\.\s*CONDICIONANTES/i);
+      if (s4.length > 1) blocoC = s4[1];
+    } catch(e4) { blocoC = ''; }
 
-    // Estanqueidade (Cond. 7 padrão IAT: "A CADA DOIS ANOS")
-    if (/estanqueidade[\s\S]{0,180}DOIS\s+ANOS/i.test(blocoC) ||
-        /DOIS\s+ANOS[\s\S]{0,80}estanqueidade/i.test(blocoC)) {
+    // Estanqueidade — Cond. 7: "A CADA DOIS ANOS" (padrão IAT)
+    if (/estanqueidade[\s\S]{0,250}(?:A\s+CADA\s+DOIS\s+ANOS|BIENAL)/i.test(blocoC) ||
+        /(?:A\s+CADA\s+DOIS\s+ANOS)[\s\S]{0,100}estanqueidade/i.test(blocoC)) {
       resultado.condicionantes.estanqueidade = 'bienal';
-    } else if (/estanqueidade[\s\S]{0,120}ANUAL/i.test(blocoC)) {
+    } else if (/estanqueidade[\s\S]{0,120}(?:ANUAL|ANUALMENTE)/i.test(blocoC)) {
       resultado.condicionantes.estanqueidade = 'anual';
     } else if (/estanqueidade[\s\S]{0,120}SEMESTRAL/i.test(blocoC)) {
       resultado.condicionantes.estanqueidade = 'semestral';
     }
 
-    // Hidrostático (Cond. 8 padrão IAT: "ANUALMENTE")
-    if (/hidrost[áa]tico[\s\S]{0,120}ANUAL/i.test(blocoC) ||
+    // Hidrostático — Cond. 8: "ANUALMENTE" (padrão IAT)
+    if (/hidrost[áa]tico[\s\S]{0,120}(?:ANUAL|ANUALMENTE)/i.test(blocoC) ||
         /ANUALMENTE[\s\S]{0,80}hidrost[áa]tico/i.test(blocoC)) {
       resultado.condicionantes.hidrostatico = 'anual';
-    } else if (/hidrost[áa]tico[\s\S]{0,120}DOIS\s+ANOS/i.test(blocoC)) {
+    } else if (/hidrost[áa]tico[\s\S]{0,120}(?:A\s+CADA\s+DOIS\s+ANOS|BIENAL)/i.test(blocoC)) {
       resultado.condicionantes.hidrostatico = 'bienal';
     }
 
-    // Efluente CSAO (Cond. IAT: "CSAO ... SEMESTRAL")
-    if (/(?:CSAO|caixa\s+separadora)[\s\S]{0,100}SEMESTRAL/i.test(blocoC) ||
+    // CSAO — Cond. 5: "CSAO ... SEMESTRAL" (padrão IAT)
+    if (/(?:CSAO|caixa\s+separadora[\s\S]{0,30}[áa]gua[\s\S]{0,10}[óo]leo)[\s\S]{0,120}SEMESTRAL/i.test(blocoC) ||
         /SEMESTRAL[\s\S]{0,80}(?:CSAO|caixa\s+separadora)/i.test(blocoC)) {
       resultado.condicionantes.analiseCSAO = 'semestral';
     }
 
-    // Água de Poço (Cond. IAT: "poço tubular ... SEMESTRAL")
-    if (/po[çc]o/i.test(t)) {
-      if (/po[çc]o[\s\S]{0,150}SEMESTRAL/i.test(blocoC) ||
-          /qualidade\s+da\s+[áa]gua[\s\S]{0,100}SEMESTRAL/i.test(blocoC)) {
-        resultado.condicionantes.analisePoco = 'semestral';
-      }
+    // Poço — Cond. 6: "poço tubular ... SEMESTRAL" (padrão IAT)
+    if (/po[çc]o[\s\S]{0,250}SEMESTRAL/i.test(blocoC) ||
+        /qualidade\s+da\s+[áa]gua[\s\S]{0,120}SEMESTRAL/i.test(blocoC)) {
+      resultado.condicionantes.analisePoco = 'semestral';
     }
 
   } catch(erro) { console.error('[SASC] extrairDadosLicencaIAT:', erro); }
   return resultado;
 }
 
-// Aplica os dados da nova função no schema real do SILA
-// Substitui aplicarDadosEspecificosNoSila — mesma assinatura
 function aplicarDadosEspecificosNoSila(dados, cnpjKey, idx) {
   try {
     if (!dados) return 0;
