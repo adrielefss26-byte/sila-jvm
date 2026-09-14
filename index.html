@@ -9422,15 +9422,89 @@ async function sascImportarLicenca(file, idx) {
       if (!existe) { ENV[cnpjKey].residuo.push(res); injections++; }
     });
 
+    // ── Extrai data instalação dos tanques (seção 3.1) ──────────────
+    var dataInstTanque = null;
+    try {
+      // Padrão real: "01/01/2016" em linha que menciona tanque ou instalação
+      // Isola bloco 3.1 se existir
+      var bloco31 = '';
+      var m31 = texto.match(/3[.\s]+1[\s\S]*?TANQUE[\s\S]*?(?=3[.\s]+2|4[.\s]+|$)/i);
+      bloco31 = m31 ? m31[0] : texto;
+
+      // Data no formato DD/MM/AAAA ou DD/MM/AA
+      var mDatas = bloco31.match(/(?:data\s+(?:de\s+)?instala[çc][aã]o|instala[çc][aã]o)[^\n]{0,100}(\d{2}\/\d{2}\/\d{2,4})/i);
+      if (!mDatas) {
+        // Fallback: qualquer data no bloco 3.1
+        var todasDatas = bloco31.match(/\b(\d{2}\/\d{2}\/\d{4})\b/g);
+        if (todasDatas && todasDatas.length) {
+          // Usa a primeira data encontrada no bloco de tanques
+          mDatas = [null, todasDatas[0]];
+        }
+      }
+      if (mDatas && mDatas[1]) {
+        var partes = mDatas[1].split('/');
+        var ano = partes[2].length === 2 ? '20' + partes[2] : partes[2];
+        dataInstTanque = ano + '-' + partes[1].padStart(2,'0') + '-' + partes[0].padStart(2,'0');
+      }
+    } catch(eTank) { console.warn('[SASC] extração data tanque:', eTank); }
+
     // ── Extrai condicionantes/prazos SASC ──────────────────────────
     var prazosSasc = _sascExtrairPrazosSasc(texto);
-    if (prazosSasc.estanqueidade || prazosSasc.hidrostatico) {
-      // Preenche o formulário SASC se estiver visível
-      var cid = cnpjKey;
-      var selEstanq = document.getElementById('sasc-periodo-estanq-' + cid);
-      var selHidro  = document.getElementById('sasc-periodo-hidro-'  + cid);
-      if (selEstanq && prazosSasc.estanqueidade) selEstanq.value = prazosSasc.estanqueidade;
-      if (selHidro  && prazosSasc.hidrostatico)  selHidro.value  = prazosSasc.hidrostatico;
+
+    // ── Preenche E SALVA campos SASC automaticamente ─────────────
+    if (prazosSasc.estanqueidade || prazosSasc.hidrostatico || dataInstTanque) {
+      try {
+        // 1. Preenche os selects/inputs do formulário SASC (se estiver aberto)
+        var cid = cnpjKey;
+        var selEstanq  = document.getElementById('sasc-periodo-estanq-' + cid);
+        var selHidro   = document.getElementById('sasc-periodo-hidro-'  + cid);
+        var inpInstall = document.getElementById('sasc-data-install-'   + cid);
+        if (selEstanq  && prazosSasc.estanqueidade) selEstanq.value  = prazosSasc.estanqueidade;
+        if (selHidro   && prazosSasc.hidrostatico)  selHidro.value   = prazosSasc.hidrostatico;
+        if (inpInstall && dataInstTanque)            inpInstall.value = dataInstTanque;
+
+        // 2. Persiste direto em CTRL.tanques (mesma chave _sascCnpj usada por sascSalvar)
+        if (!CTRL) CTRL = {};
+        if (!CTRL.tanques) CTRL.tanques = [];
+        var entryIdx = CTRL.tanques.findIndex(function(t) {
+          return t._sascCnpj === cnpjKey && t.subtipo === 'sasc_dados';
+        });
+        var baseEntry = entryIdx >= 0 ? CTRL.tanques[entryIdx] : {};
+
+        // Calcula próximos testes e prazo de remoção
+        var proxEstanq = _sascProximo(baseEntry.ultimoEstanq || null, prazosSasc.estanqueidade || baseEntry.periodoEstanq);
+        var proxHidro  = _sascProximo(baseEntry.ultimoHidro  || null, prazosSasc.hidrostatico  || baseEntry.periodoHidro);
+        var prazoRemoc = null;
+        if (dataInstTanque || baseEntry.dataInstalacao) {
+          var dtBase = dataInstTanque || baseEntry.dataInstalacao;
+          var anos   = parseInt(baseEntry.vidaUtil || 25);
+          try {
+            var dR = new Date(dtBase + 'T00:00:00');
+            dR.setFullYear(dR.getFullYear() + anos);
+            prazoRemoc = dR.toISOString().slice(0, 10);
+          } catch(eR) {}
+        }
+
+        var novaEntry = Object.assign({}, baseEntry, {
+          _sascCnpj:      cnpjKey,
+          subtipo:        'sasc_dados',
+          empresa:        cnpjKey,
+          periodoEstanq:  prazosSasc.estanqueidade  || baseEntry.periodoEstanq  || '',
+          periodoHidro:   prazosSasc.hidrostatico   || baseEntry.periodoHidro   || '',
+          proximoEstanq:  proxEstanq                || baseEntry.proximoEstanq,
+          proximoHidro:   proxHidro                 || baseEntry.proximoHidro,
+          dataInstalacao: dataInstTanque            || baseEntry.dataInstalacao || null,
+          vidaUtil:       baseEntry.vidaUtil        || 25,
+          prazoRemocao:   prazoRemoc                || baseEntry.prazoRemocao,
+        });
+
+        if (entryIdx >= 0) {
+          CTRL.tanques[entryIdx] = novaEntry;
+        } else {
+          CTRL.tanques.push(novaEntry);
+        }
+        injections++; // conta como dado injetado
+      } catch(eSasc) { console.warn('[SASC] preencher campos SASC:', eSasc); }
     }
 
     changes++; save();
@@ -9557,29 +9631,55 @@ function _sascExtrairAmbiental(texto) {
       });
     }
 
-    // ── Resíduos ──────────────────────────────────────────────────
-    // Resíduos contaminados (padrão postos)
-    var residPadroes = [
-      { re: /borra\s*de\s*[óo]leo|borra\s*de\s*combust|res[íi]duo\s*oleoso/i,
-        codigo: '13 05 03', descricao: 'Borra de óleo / resíduo oleoso', destinacao: 'Empresa licenciada' },
-      { re: /filtro\s*de\s*[óo]leo|filtros?\s*usados?/i,
-        codigo: '16 01 07', descricao: 'Filtros de óleo usados', destinacao: 'Empresa licenciada' },
-      { re: /trapo|pano\s*contaminado|material\s*absorvente/i,
-        codigo: '15 02 02', descricao: 'Trapos e materiais absorventes contaminados', destinacao: 'Empresa licenciada' },
-      { re: /res[íi]duo\s*comum|lixo\s*comum|res[íi]duo\s*dom[ée]stico/i,
-        codigo: '20 03 01', descricao: 'Resíduo sólido urbano / comum', destinacao: 'Coleta municipal' },
-    ];
-    residPadroes.forEach(function(rp) {
-      if (rp.re.test(t)) {
-        var qtd = (t.match(new RegExp(rp.re.source + '[^\\n]{0,60}(\\d+[,.]?\\d*)\\s*(?:kg|L|m[³3])', 'i')) || [])[1] || '';
+    // ── Resíduos Sólidos — extração do bloco 3.6 do PDF ────────────
+    // Isola o bloco entre "3.6 RESÍDUOS SÓLIDOS" e "4. CONDICIONANTES"
+    var blocoResid = '';
+    try {
+      var mBloco = t.match(/3[\.\s]+6[\s\S]*?RES[IÍ]DUOS?\s+S[OÓ]LIDOS?([\s\S]*?)(?=4[\.\s]+CONDICIONANTES?|5[\.\s]+|$)/i);
+      blocoResid = mBloco ? mBloco[1] : t; // fallback: varre o texto todo
+    } catch(eb) { blocoResid = t; }
+
+    // Regex por linha: código(6 dígitos com espaços/traços opcionais) + descrição + qty + unidade + destinação
+    // Formatos reais: "150110-Embalagem..." | "130201 Óleos..." | "20 03 01 Papel..."
+    var linhas = blocoResid.split(/\n/);
+    linhas.forEach(function(linha) {
+      try {
+        var mCod = linha.match(/\b(\d{2}\s?\d{2}\s?\d{2})\b/);
+        if (!mCod) return;
+        var codigo = mCod[1].replace(/\s/g, ' ').trim();
+
+        // Descrição: texto após o código (e possível traço/espaço separador)
+        var restoCod = linha.slice(linha.indexOf(mCod[0]) + mCod[0].length)
+                            .replace(/^[-\s]+/, '').trim();
+
+        // Quantidade + unidade: NN,NN kg | NN,NN l | NN unid  (com vírgula ou ponto)
+        var mQtd = restoCod.match(/(\d+[,.]\d+|\d+)\s*(kg|kG|KG|l\b|L\b|litros?|unid(?:ades?)?|m[³3])/i);
+        var quantidade = mQtd ? mQtd[1].replace(',', '.') : '';
+        var unidade    = mQtd ? mQtd[2].toLowerCase()     : '';
+
+        // Descrição: tudo antes da quantidade (ou todo o texto se não houver qty)
+        var descricao = mQtd
+          ? restoCod.slice(0, restoCod.indexOf(mQtd[0])).trim()
+          : restoCod;
+        descricao = descricao.replace(/\s+/g, ' ').trim().replace(/[.,;]+$/, '');
+        if (descricao.length < 3) return; // linha sem descrição útil
+
+        // Destinação: texto após qty+unidade
+        var destinacao = '';
+        if (mQtd) {
+          destinacao = restoCod.slice(restoCod.indexOf(mQtd[0]) + mQtd[0].length)
+                               .replace(/^[-\s|]+/, '').trim()
+                               .replace(/\s+/g, ' ');
+        }
+
         result.residuo.push({
-          codigo: rp.codigo,
-          descricao: rp.descricao,
-          quantidade: qtd.replace(',', '.'),
-          unidade: 'kg/mês',
-          destinacao: rp.destinacao
+          codigo:    codigo,
+          descricao: descricao,
+          quantidade: quantidade,
+          unidade:   unidade || 'kg',
+          destinacao: destinacao
         });
-      }
+      } catch(el) { /* linha inválida — ignora */ }
     });
 
   } catch(e) { console.warn('[SASC] _sascExtrairAmbiental:', e); }
@@ -9592,21 +9692,50 @@ function _sascExtrairPrazosSasc(texto) {
   try {
     var t = texto || '';
 
-    // Estanqueidade
-    if (/bienal.*?estanqueidade|estanqueidade.*?bienal|a\s+cada\s+2\s+anos.*?estanqueidade/i.test(t))
-      result.estanqueidade = 'bienal';
-    else if (/anual.*?estanqueidade|estanqueidade.*?anual/i.test(t))
-      result.estanqueidade = 'anual';
-    else if (/semestral.*?estanqueidade|estanqueidade.*?semestral/i.test(t))
-      result.estanqueidade = 'semestral';
+    // Isola o bloco de condicionantes para evitar falsos positivos
+    var blocoC = '';
+    try {
+      var mC = t.match(/4[\.\s]+CONDICIONANTES?([\s\S]*?)(?=5[\.\s]+|$)/i);
+      blocoC = mC ? mC[1] : t;
+    } catch(ec) { blocoC = t; }
 
-    // Hidrostático
-    if (/anual.*?hidrost[áa]tico|hidrost[áa]tico.*?anual/i.test(t))
-      result.hidrostatico = 'anual';
-    else if (/semestral.*?hidrost[áa]tico|hidrost[áa]tico.*?semestral/i.test(t))
-      result.hidrostatico = 'semestral';
-    else if (/bienal.*?hidrost[áa]tico|hidrost[áa]tico.*?bienal/i.test(t))
-      result.hidrostatico = 'bienal';
+    // Helper: encontra a periodicidade numa frase que menciona o tipo de teste
+    function _freqNoTrecho(frase) {
+      var f = frase || '';
+      if (/a\s+cada\s+dois\s+anos|a\s+cada\s+2\s+anos|bienal/i.test(f)) return 'bienal';
+      if (/trienal|a\s+cada\s+3\s+anos|a\s+cada\s+tr[eê]s\s+anos/i.test(f))  return 'trienal';
+      if (/semestral|a\s+cada\s+(?:seis|6)\s+meses/i.test(f))               return 'semestral';
+      if (/trimestral|a\s+cada\s+(?:tr[eê]s|3)\s+meses/i.test(f))           return 'trimestral';
+      if (/anualmente|anual|a\s+cada\s+(?:um|1)\s+ano/i.test(f))             return 'anual';
+      return null;
+    }
+
+    // ── Estanqueidade ────────────────────────────────────────────
+    // Procura sentenças que mencionem estanqueidade + (bombas|linhas|tanques|filtros)
+    var sentEstanq = blocoC.match(/[^.!?\n]{0,200}estanqueidade[^.!?\n]{0,300}(?:bombas?|linhas?|tanques?|filtros?|SASC)[^.!?\n]{0,200}/ig);
+    if (!sentEstanq) {
+      // fallback: pega qualquer sentença com "estanqueidade" que tenha frequência
+      sentEstanq = blocoC.match(/[^.!?\n]{0,200}estanqueidade[^.!?\n]{0,300}/ig);
+    }
+    if (sentEstanq) {
+      for (var i = 0; i < sentEstanq.length; i++) {
+        var freq = _freqNoTrecho(sentEstanq[i]);
+        if (freq) { result.estanqueidade = freq; break; }
+      }
+    }
+
+    // ── Hidrostático ─────────────────────────────────────────────
+    // Procura sentenças que mencionem hidrostático + (sump|spill|sumps|spills)
+    var sentHidro = blocoC.match(/[^.!?\n]{0,200}hidrost[áa]tico[^.!?\n]{0,300}(?:sump|spill|bocal|estanqueidade)[^.!?\n]{0,200}/ig);
+    if (!sentHidro) {
+      sentHidro = blocoC.match(/[^.!?\n]{0,200}hidrost[áa]tico[^.!?\n]{0,300}/ig);
+    }
+    if (sentHidro) {
+      for (var j = 0; j < sentHidro.length; j++) {
+        var freqH = _freqNoTrecho(sentHidro[j]);
+        if (freqH) { result.hidrostatico = freqH; break; }
+      }
+    }
 
   } catch(e) { console.warn('[SASC] _sascExtrairPrazosSasc:', e); }
   return result;
