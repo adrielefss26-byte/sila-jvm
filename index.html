@@ -10175,7 +10175,8 @@ function gerarPdfCondicionantes() {
 
 // Atualiza resumo ao mudar seleção de processo
 document.addEventListener('change', function(e) {
-  if (e.target && e.targ
+  if (e.target && e.target.id === 'pdfSelectEmp') _updatePdfCondResumo();
+});
 
 async function sascImportarLicenca(file, idx) {
   try {
