@@ -9104,12 +9104,17 @@ function extrairDadosLicencaIAT(textoPdf) {
     var t = (textoPdf || '');
     // Limpeza do artefato "EM BRANCO" do PDF do IAT (texto de páginas em branco
     // que o pdf.js intercala com o conteúdo real, às vezes colado nos tokens)
-    t = t.replace(/\bEM(\d{6})\s+BRANCO\b/g, '$1');  // EM190813 BRANCO → 190813
-    t = t.replace(/([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ])EM([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ])/g, '$1$2'); // EMtransmissões → transmissões
-    t = t.replace(/\bEM\s+BRANCO\b/gi, ' ');          // EM BRANCO isolado → espaço
-    t = t.replace(/\bBRANCO\b/g, ' ');                 // BRANCO residual → espaço
-    t = t.replace(/\s{3,}/g, ' ');                     // múltiplos espaços → 1
-    t = t.replace(/\n[ \t]+\n/g, '\n\n');              // linhas só com espaços
+    t = t.replace(/\bEM(\d{6})\b/g, '$1');
+    t = t.replace(/([a-záéíóúàâêôãõç,])EM\b/g, '$1');
+    t = t.replace(/\bEM([a-záéíóúàâêôãõç])/g, '$1');
+    t = t.replace(/\s+EM\s*\n/g, '\n');
+    t = t.replace(/\nEM\s+/g, '\n');
+    t = t.replace(/\bEM\s+BRANCO\b/gi, ' ');
+    t = t.replace(/\bBRANCO\b/g, ' ');
+    t = t.replace(/(?<=[a-záéíóúàâêôãõç])\s+EM\s+(?=[a-záéíóúàâêôãõç])/g, ' ');
+    t = t.replace(/\s+EM\s*$/gm, '');
+    t = t.replace(/\s{3,}/g, ' ');
+    t = t.replace(/\n{3,}/g, '\n')
 
     // ── 1. BLOCO 3.1 — delimitado entre "3.1 TANQUE DE COMBUSTÍVEL" e "3.2 ÁGUA" ──────
     var bloco31 = '';
@@ -9291,18 +9296,21 @@ function aplicarDadosEspecificosNoSila(dados, cnpjKey, idx) {
       var pE = _sascProximo(base.ultimoEstanq||null, estanq||base.periodoEstanq);
       var pH = _sascProximo(base.ultimoHidro ||null, hidro ||base.periodoHidro);
 
-      var entry = Object.assign({}, base, {
+      var entry = {
         _sascCnpj:     cnpjKey,
         subtipo:       'sasc_dados',
         empresa:       cnpjKey,
-        periodoEstanq: estanq        || base.periodoEstanq || '',
-        periodoHidro:  hidro         || base.periodoHidro  || '',
-        proximoEstanq: pE            || base.proximoEstanq,
-        proximoHidro:  pH            || base.proximoHidro,
-        dataInstalacao: dtInstISO    || base.dataInstalacao || null,
-        vidaUtil:      base.vidaUtil || 25,
-        prazoRemocao:  prazoRemocISO || base.prazoRemocao
-      });
+        periodoEstanq: estanq                    || (base.periodoEstanq  || ''),
+        periodoHidro:  hidro                     || (base.periodoHidro   || ''),
+        proximoEstanq: pE                        || (base.proximoEstanq  || null),
+        proximoHidro:  pH                        || (base.proximoHidro   || null),
+        dataInstalacao: dtInstISO                || (base.dataInstalacao || null),
+        vidaUtil:      base.vidaUtil             || 25,
+        prazoRemocao:  prazoRemocISO             || (base.prazoRemocao   || null),
+        ultimoEstanq:  base.ultimoEstanq         || null,
+        ultimoHidro:   base.ultimoHidro          || null,
+        obs:           base.obs                  || ''
+      };
       if (eIdx >= 0) { CTRL.tanques[eIdx] = entry; }
       else           { CTRL.tanques.push(entry); }
       injTotal++;
@@ -9494,49 +9502,53 @@ async function sascImportarLicenca(file, idx) {
     });
 
     if (!texto) {
-      // Fallback: leitura simples com pdf.js
       var buf = await file.arrayBuffer();
       var pdf = await pdfjsLib.getDocument({ data: buf }).promise;
       var partes = [];
       for (var p = 1; p <= pdf.numPages; p++) {
         var page = await pdf.getPage(p);
-        var tc = await page.getTextContent();
-        partes.push(tc.items.map(function(i) { return i.str; }).join(' '));
+        var tc   = await page.getTextContent();
+        partes.push(tc.items.map(function(i){ return i.str; }).join(' '));
       }
       texto = partes.join('\n');
     }
 
-    var r = DATA[idx] || {};
-
-    // ── Limpeza do artefato "EM BRANCO" do PDF do IAT ────────────
-    // O PDF tem camadas sobrepostas (páginas em branco) que intercalam
-    // "EM BRANCO" e até "EM" colado em tokens reais
+    // ── Limpeza dos artefatos "EM BRANCO" do PDF do IAT ──────────
+    // O IAT tem páginas em branco com texto "EM BRANCO" que o pdf.js
+    // intercala com o conteúdo real em vários padrões:
+    // "EM190813 BRANCO", "outrosEM", "EMtransmissões", " EM usados"
     try {
-      texto = texto.replace(/EM(\d{6})\s+BRANCO/g, '$1');
-      texto = texto.replace(/([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ])EM([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ])/g, '$1$2');
-      texto = texto.replace(/EM\s+BRANCO/gi, ' ');
-      texto = texto.replace(/BRANCO/g, ' ');
-      texto = texto.replace(/[ 	]{3,}/g, ' ');
+      texto = texto.replace(/\bEM(\d{6})\b/g, '$1');
+      texto = texto.replace(/([a-z\u00e0-\u00fc,])EM\b/g, '$1');
+      texto = texto.replace(/\bEM([a-z\u00e0-\u00fc])/g, '$1');
+      texto = texto.replace(/\s+EM\s*\n/g, '\n');
+      texto = texto.replace(/\nEM\s+/g, '\n');
+      texto = texto.replace(/\bEM\s+BRANCO\b/gi, ' ');
+      texto = texto.replace(/\bBRANCO\b/g, ' ');
+      texto = texto.replace(/(?<=[a-z\u00e0-\u00fc])\s+EM\s+(?=[a-z\u00e0-\u00fc])/g, ' ');
+      texto = texto.replace(/\s+EM\s*$/gm, '');
+      texto = texto.replace(/[ \t]{3,}/g, ' ');
+      texto = texto.replace(/\n{3,}/g, '\n');
     } catch(eLimpa) {}
+
+    var r = DATA[idx] || {};
 
     // ── Extrai dados gerais ────────────────────────────────────────
     var meta = _sascExtrairMeta(texto);
 
-    // Preenche campos editáveis do registro se vazios
     var changed = false;
-    if (meta.empresa && !r.empresa) { r.empresa = meta.empresa; changed = true; }
-    if (meta.cnpj    && !r.cnpj)    { r.cnpj    = meta.cnpj;    changed = true; }
-    if (meta.municipio && !r.municipio) { r.municipio = meta.municipio; changed = true; }
+    if (meta.empresa   && !r.empresa)   { r.empresa   = meta.empresa;   changed = true; }
+    if (meta.cnpj      && !r.cnpj)      { r.cnpj      = meta.cnpj;      changed = true; }
+    if (meta.municipio && !r.municipio) { r.municipio  = meta.municipio; changed = true; }
 
-    // Atualiza DATA e LICHI com dados da licença
     if (meta.numLicenca || meta.validade) {
-      var cnpjKey = _empKey(r);
-      if (!LICHI[cnpjKey]) LICHI[cnpjKey] = [];
-      var licEntry = LICHI[cnpjKey].find(function(l) {
+      var cnpjKey2 = _empKey(r);
+      if (!LICHI[cnpjKey2]) LICHI[cnpjKey2] = [];
+      var licEntry = LICHI[cnpjKey2].find(function(l) {
         return l.numLicenca === meta.numLicenca && meta.numLicenca;
       });
       if (!licEntry) {
-        LICHI[cnpjKey].unshift({
+        LICHI[cnpjKey2].unshift({
           modalidade:     r.modalidade || '',
           situacao:       r.situacao   || '',
           dataEmissao:    meta.dataEmissao    || '',
@@ -9557,10 +9569,9 @@ async function sascImportarLicenca(file, idx) {
     var cnpjKey = _empKey(r);
     if (!ENV[cnpjKey]) ENV[cnpjKey] = { agua: [], efluente: [], residuo: [] };
 
-    var ambiental = _sascExtrairAmbiental(texto);
-    var injections = 0;
+    var ambiental   = _sascExtrairAmbiental(texto);
+    var injections  = 0;
 
-    // Água
     (ambiental.agua || []).forEach(function(a) {
       var existe = ENV[cnpjKey].agua.some(function(x) {
         return x.origem === a.origem && x.uso === a.uso;
@@ -9568,7 +9579,6 @@ async function sascImportarLicenca(file, idx) {
       if (!existe) { ENV[cnpjKey].agua.push(a); injections++; }
     });
 
-    // Efluente
     (ambiental.efluente || []).forEach(function(e) {
       var existe = ENV[cnpjKey].efluente.some(function(x) {
         return x.origem === e.origem && x.tratamento === e.tratamento;
@@ -9576,123 +9586,19 @@ async function sascImportarLicenca(file, idx) {
       if (!existe) { ENV[cnpjKey].efluente.push(e); injections++; }
     });
 
-    // Resíduo
     (ambiental.residuo || []).forEach(function(res) {
       var existe = ENV[cnpjKey].residuo.some(function(x) {
-        return x.codigo === res.codigo && x.descricao === res.descricao;
+        return x.codIbama === res.codIbama && x.especifico === res.especifico;
       });
       if (!existe) { ENV[cnpjKey].residuo.push(res); injections++; }
     });
 
-    // ── Extrai data instalação dos tanques (seção 3.1) — regex validado IAT ──
-    var dataInstTanque = null;
-    var dataRemocaoDisplay = null; // DD/MM/AAAA para exibição
+    // ── Executa extração específica IAT (regex validados com PDF real) ──
     try {
-      // Isola bloco 3.1 TANQUE
-      var bloco31 = texto;
-      try {
-        var m31 = texto.match(/3\.1\s+TANQUE[\s\S]*?(?=3\.2|[Á]GUA|\n3\.)/i);
-        if (m31) bloco31 = m31[0];
-      } catch(e31) {}
-
-      // Captura qualquer data DD/MM/AAAA no bloco 3.1 (padrão IAT: "01/01/2016")
-      var regexDataInst = /(?:01\/01\/\d{4}|\d{2}\/\d{2}\/\d{4})/g;
-      var datasEnc = bloco31.match(regexDataInst);
-      if (datasEnc && datasEnc.length > 0) {
-        var dtStr = datasEnc[0]; // ex: "01/01/2016"
-        var pt = dtStr.split('/');
-        if (pt.length === 3) {
-          var anoInst  = parseInt(pt[2], 10);
-          var anoRemoc = anoInst + 25;
-          // Formato ISO para o input[type=date]
-          dataInstTanque = pt[2] + '-' + pt[1].padStart(2,'0') + '-' + pt[0].padStart(2,'0');
-          // Formato legível para exibição
-          dataRemocaoDisplay = pt[0] + '/' + pt[1] + '/' + anoRemoc;
-        }
-      }
-
-      // Fallback: procura "data de instalação" em qualquer parte do texto
-      if (!dataInstTanque) {
-        var mFallback = texto.match(/instala[çc][aã]o[^\n]{0,100}(\d{2}\/\d{2}\/\d{4})/i);
-        if (!mFallback) mFallback = texto.match(/(\d{2}\/\d{2}\/\d{4})/);
-        if (mFallback && mFallback[1]) {
-          var ptF = mFallback[1].split('/');
-          if (ptF.length === 3) {
-            dataInstTanque = ptF[2] + '-' + ptF[1].padStart(2,'0') + '-' + ptF[0].padStart(2,'0');
-            dataRemocaoDisplay = ptF[0] + '/' + ptF[1] + '/' + (parseInt(ptF[2], 10) + 25);
-          }
-        }
-      }
-    } catch(eTank) { console.warn('[SASC] extração data tanque:', eTank); }
-
-    // ── Extrai condicionantes/prazos SASC ──────────────────────────
-    var prazosSasc = _sascExtrairPrazosSasc(texto);
-
-    // ── Preenche E SALVA campos SASC automaticamente ─────────────
-    if (prazosSasc.estanqueidade || prazosSasc.hidrostatico || dataInstTanque) {
-      try {
-        // 1. Preenche os selects/inputs do formulário SASC (se estiver aberto)
-        var cid = cnpjKey;
-        var selEstanq  = document.getElementById('sasc-periodo-estanq-' + cid);
-        var selHidro   = document.getElementById('sasc-periodo-hidro-'  + cid);
-        var inpInstall = document.getElementById('sasc-data-install-'   + cid);
-        if (selEstanq  && prazosSasc.estanqueidade) selEstanq.value  = prazosSasc.estanqueidade;
-        if (selHidro   && prazosSasc.hidrostatico)  selHidro.value   = prazosSasc.hidrostatico;
-        if (inpInstall && dataInstTanque)            inpInstall.value = dataInstTanque;
-
-        // 2. Persiste direto em CTRL.tanques (mesma chave _sascCnpj usada por sascSalvar)
-        if (!CTRL) CTRL = {};
-        if (!CTRL.tanques) CTRL.tanques = [];
-        var entryIdx = CTRL.tanques.findIndex(function(t) {
-          return t._sascCnpj === cnpjKey && t.subtipo === 'sasc_dados';
-        });
-        var baseEntry = entryIdx >= 0 ? CTRL.tanques[entryIdx] : {};
-
-        // Calcula próximos testes e prazo de remoção
-        var proxEstanq = _sascProximo(baseEntry.ultimoEstanq || null, prazosSasc.estanqueidade || baseEntry.periodoEstanq);
-        var proxHidro  = _sascProximo(baseEntry.ultimoHidro  || null, prazosSasc.hidrostatico  || baseEntry.periodoHidro);
-        var prazoRemoc = null;
-        if (dataInstTanque || baseEntry.dataInstalacao) {
-          var dtBase = dataInstTanque || baseEntry.dataInstalacao;
-          var anos   = parseInt(baseEntry.vidaUtil || 25);
-          try {
-            var dR = new Date(dtBase + 'T00:00:00');
-            dR.setFullYear(dR.getFullYear() + anos);
-            prazoRemoc = dR.toISOString().slice(0, 10);
-          } catch(eR) {}
-        }
-
-        var novaEntry = Object.assign({}, baseEntry, {
-          _sascCnpj:      cnpjKey,
-          subtipo:        'sasc_dados',
-          empresa:        cnpjKey,
-          periodoEstanq:  prazosSasc.estanqueidade  || baseEntry.periodoEstanq  || '',
-          periodoHidro:   prazosSasc.hidrostatico   || baseEntry.periodoHidro   || '',
-          proximoEstanq:  proxEstanq                || baseEntry.proximoEstanq,
-          proximoHidro:   proxHidro                 || baseEntry.proximoHidro,
-          dataInstalacao: dataInstTanque            || baseEntry.dataInstalacao || null,
-          vidaUtil:       baseEntry.vidaUtil        || 25,
-          prazoRemocao:   prazoRemoc                || baseEntry.prazoRemocao,
-        });
-
-        if (entryIdx >= 0) {
-          CTRL.tanques[entryIdx] = novaEntry;
-        } else {
-          CTRL.tanques.push(novaEntry);
-        }
-        injections++; // conta como dado injetado
-      } catch(eSasc) { console.warn('[SASC] preencher campos SASC:', eSasc); }
-    }
-
-    // ── Executa extração específica IAT (regex validados) ──────────
-    try {
-      var dadosEsp = extrairDadosLicencaIAT(texto);  // função com delimitadores precisos IAT
+      var dadosEsp = extrairDadosLicencaIAT(texto);
       var injEsp   = aplicarDadosEspecificosNoSila(dadosEsp, cnpjKey, idx);
       injections  += injEsp;
-      if (dadosEsp.tanques.dataInstalacao)
-        console.log('[SASC] Instalação tanque:', dadosEsp.tanques.dataInstalacao,
-                    '→ Remoção:', dadosEsp.tanques.dataRemocaoLimite);
-    } catch(eEsp) { console.warn('[SASC] extrairDadosEspecificosLicenca:', eEsp); }
+    } catch(eEsp) { console.warn('[SASC] extrairDadosLicencaIAT:', eEsp); }
 
     changes++; save();
     var msg = '✅ Licença importada';
@@ -9700,7 +9606,6 @@ async function sascImportarLicenca(file, idx) {
     if (injections) msg += ' · ' + injections + ' itens adicionados';
     toast(msg, 'success');
 
-    // Re-renderiza abas afetadas
     var activeIdx = DATA.findIndex(function(d) { return d._id === selectedId; });
     if (activeIdx >= 0) {
       if (activeTab === 'info') renderPInfo(activeIdx);
@@ -9714,6 +9619,7 @@ async function sascImportarLicenca(file, idx) {
     toast('Erro ao importar PDF: ' + e.message, 'error');
   }
 }
+
 
 // ── Extrai metadados gerais do texto da licença ───────────────────
 function _sascExtrairMeta(texto) {
