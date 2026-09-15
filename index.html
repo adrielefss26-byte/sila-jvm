@@ -9111,7 +9111,7 @@ function extrairDadosLicencaIAT(textoPdf) {
     t = t.replace(/\nEM\s+/g, '\n');
     t = t.replace(/\bEM\s+BRANCO\b/gi, ' ');
     t = t.replace(/\bBRANCO\b/g, ' ');
-    t = t.replace(/(?<=[a-záéíóúàâêôãõç])\s+EM\s+(?=[a-záéíóúàâêôãõç])/g, ' ');
+    t = t.replace(/([a-záéíóúàâêôãõç])\s+EM\s+([a-záéíóúàâêôãõç])/g, '$1 $2');
     t = t.replace(/\s+EM\s*$/gm, '');
     t = t.replace(/\s{3,}/g, ' ');
     t = t.replace(/\n{3,}/g, '\n')
@@ -10231,7 +10231,7 @@ async function sascImportarLicenca(file, idx) {
       texto = texto.replace(/\nEM\s+/g, '\n');
       texto = texto.replace(/\bEM\s+BRANCO\b/gi, ' ');
       texto = texto.replace(/\bBRANCO\b/g, ' ');
-      texto = texto.replace(/(?<=[a-z\u00e0-\u00fc])\s+EM\s+(?=[a-z\u00e0-\u00fc])/g, ' ');
+      texto = texto.replace(/([a-z\u00e0-\u00fc])\s+EM\s+([a-z\u00e0-\u00fc])/g, '$1 $2');
       texto = texto.replace(/\s+EM\s*$/gm, '');
       texto = texto.replace(/[ \t]{3,}/g, ' ');
       texto = texto.replace(/\n{3,}/g, '\n');
