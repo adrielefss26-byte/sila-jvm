@@ -8247,7 +8247,7 @@ function _panelSize(w) {
 /** Atualiza estado ativo dos botões de tamanho */
 function _updateSizeBtns(w) {
   document.querySelectorAll('.panel-size-btn').forEach(function(btn){
-    var bw = parseInt(btn.getAttribute('onclick').match(/\d+/)[0]);
+    var raw = btn.getAttribute('onclick'); if (!raw || !raw.match(/\d+/)) return; var bw = parseInt(raw.match(/\d+/)[0]);
     btn.classList.toggle('active', Math.abs(bw - w) < 30);
   });
 }
@@ -10175,9 +10175,187 @@ function gerarPdfCondicionantes() {
 
 // Atualiza resumo ao mudar seleção de processo
 document.addEventListener('change', function(e) {
-  if (e.target && e.target.id === 'pdfSelectEmp') _updatePdfCondResumo();
-});
+  if (e.target && e.targ
+
+async function sascImportarLicenca(file, idx) {
+  try {
+    if (!file || file.type !== 'application/pdf') {
+      alert('Selecione um arquivo PDF válido.');
+      toast('Selecione um arquivo PDF válido', 'error');
+      return;
+    }
+
+    // ── ALERT 1: Arquivo recebido ─────────────────────────────────
+    alert('Arquivo recebido: ' + file.name + '\nIniciando leitura do PDF...');
+    toast('⏳ Lendo PDF da licença...', 'info');
+
+    // ── Extrai texto do PDF ───────────────────────────────────────
+    var texto = null;
+    try {
+      texto = await extractIatPdfText(file);
+    } catch(eIat) {
+      console.warn('[SASC] extractIatPdfText falhou:', eIat);
+    }
+
+    if (!texto) {
+      try {
+        var buf = await file.arrayBuffer();
+        var pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+        var partes = [];
+        for (var p = 1; p <= pdf.numPages; p++) {
+          var page = await pdf.getPage(p);
+          var tc   = await page.getTextContent();
+          partes.push(tc.items.map(function(i){ return i.str; }).join(' '));
+        }
+        texto = partes.join('\n');
+      } catch(ePdf) {
+        // ── ALERT de falha ──────────────────────────────────────
+        alert('Erro ao ler o arquivo PDF: ' + ePdf.message + '\n\nVerifique se o arquivo é um PDF válido.');
+        toast('Erro ao ler PDF: ' + ePdf.message, 'error');
+        return;
+      }
+    }
+
+    if (!texto || texto.trim().length < 50) {
+      alert('Erro ao ler o arquivo PDF: texto extraído está vazio.\n\nVerifique se o arquivo é um PDF válido do IAT.');
+      toast('PDF sem texto legível', 'error');
+      return;
+    }
+
+    // ── Limpeza dos artefatos "EM BRANCO" do PDF do IAT ──────────
+    try {
+      texto = texto.replace(/\bEM(\d{6})\b/g, '$1');
+      texto = texto.replace(/([a-z\u00e0-\u00fc,])EM\b/g, '$1');
+      texto = texto.replace(/\bEM([a-z\u00e0-\u00fc])/g, '$1');
+      texto = texto.replace(/\s+EM\s*\n/g, '\n');
+      texto = texto.replace(/\nEM\s+/g, '\n');
+      texto = texto.replace(/\bEM\s+BRANCO\b/gi, ' ');
+      texto = texto.replace(/\bBRANCO\b/g, ' ');
+      texto = texto.replace(/(?<=[a-z\u00e0-\u00fc])\s+EM\s+(?=[a-z\u00e0-\u00fc])/g, ' ');
+      texto = texto.replace(/\s+EM\s*$/gm, '');
+      texto = texto.replace(/[ \t]{3,}/g, ' ');
+      texto = texto.replace(/\n{3,}/g, '\n');
+    } catch(eLimpa) { console.warn('[SASC] limpeza:', eLimpa); }
+
+    var r = DATA[idx] || {};
+
+    // ── Extrai metadados gerais ───────────────────────────────────
+    var meta = _sascExtrairMeta(texto);
+
+    var changed = false;
+    if (meta.empresa   && !r.empresa)   { r.empresa   = meta.empresa;   changed = true; }
+    if (meta.cnpj      && !r.cnpj)      { r.cnpj      = meta.cnpj;      changed = true; }
+    if (meta.municipio && !r.municipio) { r.municipio  = meta.municipio; changed = true; }
+
+    if (meta.numLicenca || meta.validade) {
+      var cnpjKey2 = _empKey(r);
+      if (!LICHI[cnpjKey2]) LICHI[cnpjKey2] = [];
+      var licEntry = LICHI[cnpjKey2].find(function(l) {
+        return l.numLicenca === meta.numLicenca && meta.numLicenca;
+      });
+      if (!licEntry) {
+        LICHI[cnpjKey2].unshift({
+          modalidade:     r.modalidade || '',
+          situacao:       r.situacao   || '',
+          dataEmissao:    meta.dataEmissao    || '',
+          dataVencimento: meta.validade       || r.validade || '',
+          prazoAdequacao: '',
+          numLicenca:     meta.numLicenca     || '',
+          numProcesso:    meta.numProcesso    || '',
+          observacoes:    '',
+          _fromPdf:       true
+        });
+      }
+      if (meta.validade) { r.validade = meta.validade; changed = true; }
+    }
+    if (changed) { DATA[idx] = r; }
+
+    // ── Extrai dados ambientais ───────────────────────────────────
+    var cnpjKey = _empKey(r);
+    if (!ENV[cnpjKey]) ENV[cnpjKey] = { agua: [], efluente: [], residuo: [] };
+    if (!ENV[cnpjKey].agua)     ENV[cnpjKey].agua     = [];
+    if (!ENV[cnpjKey].efluente) ENV[cnpjKey].efluente = [];
+    if (!ENV[cnpjKey].residuo)  ENV[cnpjKey].residuo  = [];
+
+    var ambiental  = _sascExtrairAmbiental(texto);
+    var injections = 0;
+
+    (ambiental.agua || []).forEach(function(a) {
+      var existe = ENV[cnpjKey].agua.some(function(x){ return x.origem===a.origem && x.uso===a.uso; });
+      if (!existe) { ENV[cnpjKey].agua.push(a); injections++; }
+    });
+    (ambiental.efluente || []).forEach(function(e) {
+      var existe = ENV[cnpjKey].efluente.some(function(x){ return x.origem===e.origem && x.tratamento===e.tratamento; });
+      if (!existe) { ENV[cnpjKey].efluente.push(e); injections++; }
+    });
+    (ambiental.residuo || []).forEach(function(res) {
+      var existe = ENV[cnpjKey].residuo.some(function(x){ return x.codIbama===res.codIbama && x.especifico===res.especifico; });
+      if (!existe) { ENV[cnpjKey].residuo.push(res); injections++; }
+    });
+
+    // ── Extração específica IAT (regex validados com PDF real) ────
+    var dadosEsp   = {};
+    var injEsp     = 0;
+    try {
+      dadosEsp = extrairDadosLicencaIAT(texto);
+      injEsp   = aplicarDadosEspecificosNoSila(dadosEsp, cnpjKey, idx);
+      injections += injEsp;
+    } catch(eEsp) { console.warn('[SASC] extrairDadosLicencaIAT:', eEsp); }
+
+    // ── Salva tudo ────────────────────────────────────────────────
+    // Garante que ENV não tem undefined antes de salvar no Firebase
+    try {
+      var envStr = JSON.stringify(ENV[cnpjKey], function(k, v){ return v === undefined ? null : v; });
+      ENV[cnpjKey] = JSON.parse(envStr);
+      localStorage.setItem('sila6_env', JSON.stringify(ENV, function(k,v){ return v===undefined?null:v; }));
+    } catch(eSave) {}
+
+    changes++; save();
+
+    // ── ALERT 3: Resultado da extração ───────────────────────────
+    var condInfo = dadosEsp.condicionantes || {};
+    var tanqInfo = dadosEsp.tanques        || {};
+    var msgAlert = '✅ Leitura concluída com sucesso!\n\n';
+    msgAlert += '📦 Resíduos encontrados: ' + (dadosEsp.residuos ? dadosEsp.residuos.length : 0) + '\n';
+    msgAlert += '💧 Água: ' + (ambiental.agua||[]).length + ' origem(s)\n';
+    msgAlert += '🚰 Efluentes: ' + (ambiental.efluente||[]).length + ' origem(s)\n';
+    msgAlert += '♻️ Resíduos ambientais: ' + (ambiental.residuo||[]).length + '\n';
+    if (tanqInfo.dataInstalacao) msgAlert += '📅 Instalação tanques: ' + tanqInfo.dataInstalacao + ' → Remoção: ' + (tanqInfo.dataRemocaoLimite||'?') + '\n';
+    if (condInfo.estanqueidade)  msgAlert += '🔵 Estanqueidade: ' + condInfo.estanqueidade + '\n';
+    if (condInfo.hidrostatico)   msgAlert += '💧 Hidrostático: ' + condInfo.hidrostatico + '\n';
+    if (condInfo.analiseCSAO)    msgAlert += '🔬 CSAO: ' + condInfo.analiseCSAO + '\n';
+    if (condInfo.analisePoco)    msgAlert += '🚿 Poço: ' + condInfo.analisePoco + '\n';
+    if (meta.numLicenca)         msgAlert += '📋 Licença: ' + meta.numLicenca + '\n';
+    alert(msgAlert);
+
+    var msg = '✅ PDF importado';
+    if (meta.numLicenca) msg += ' — ' + meta.numLicenca;
+    if (injections) msg += ' · ' + injections + ' campos preenchidos';
+    toast(msg, 'success');
+
+    // ── FIX 3: Atualiza DOM e redesenha tabelas imediatamente ─────
+    var activeIdx = DATA.findIndex(function(d){ return d._id === selectedId; });
+    if (activeIdx >= 0) {
+      renderPInfo(activeIdx);   // redesenha aba Processo (inclui card SASC)
+      renderPAmb(activeIdx);    // redesenha aba Ambiental (tabela resíduos)
+      renderPLicencas(activeIdx);
+    }
+    renderCtrl();   // atualiza cards de controle no dashboard
+    renderTable();
+
+  } catch(e) {
+    alert('Erro inesperado na importação: ' + e.message);
+    console.error('[SASC] sascImportarLicenca erro:', e);
+    toast('Erro ao importar PDF: ' + e.message, 'error');
+  }
+}
+
 </script>
+ 'pdfSelectEmp') _updatePdfCondResumo();
+});
+
+
+
 
 <!-- ── Modal: Trocar Senha ── -->
   <div id="changePwdBox" style="display:none;background:var(--s1);border:1px solid var(--border);border-radius:16px;padding:28px 28px 22px;width:100%;max-width:360px;box-shadow:0 20px 60px rgba(0,0,0,.7)">
@@ -10422,177 +10600,4 @@ document.addEventListener('change', function(e) {
 </div>
 
 </body>
-</html>async function sascImportarLicenca(file, idx) {
-  try {
-    if (!file || file.type !== 'application/pdf') {
-      alert('Selecione um arquivo PDF válido.');
-      toast('Selecione um arquivo PDF válido', 'error');
-      return;
-    }
-
-    // ── ALERT 1: Arquivo recebido ─────────────────────────────────
-    alert('Arquivo recebido: ' + file.name + '\nIniciando leitura do PDF...');
-    toast('⏳ Lendo PDF da licença...', 'info');
-
-    // ── Extrai texto do PDF ───────────────────────────────────────
-    var texto = null;
-    try {
-      texto = await extractIatPdfText(file);
-    } catch(eIat) {
-      console.warn('[SASC] extractIatPdfText falhou:', eIat);
-    }
-
-    if (!texto) {
-      try {
-        var buf = await file.arrayBuffer();
-        var pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-        var partes = [];
-        for (var p = 1; p <= pdf.numPages; p++) {
-          var page = await pdf.getPage(p);
-          var tc   = await page.getTextContent();
-          partes.push(tc.items.map(function(i){ return i.str; }).join(' '));
-        }
-        texto = partes.join('\n');
-      } catch(ePdf) {
-        // ── ALERT de falha ──────────────────────────────────────
-        alert('Erro ao ler o arquivo PDF: ' + ePdf.message + '\n\nVerifique se o arquivo é um PDF válido.');
-        toast('Erro ao ler PDF: ' + ePdf.message, 'error');
-        return;
-      }
-    }
-
-    if (!texto || texto.trim().length < 50) {
-      alert('Erro ao ler o arquivo PDF: texto extraído está vazio.\n\nVerifique se o arquivo é um PDF válido do IAT.');
-      toast('PDF sem texto legível', 'error');
-      return;
-    }
-
-    // ── Limpeza dos artefatos "EM BRANCO" do PDF do IAT ──────────
-    try {
-      texto = texto.replace(/\bEM(\d{6})\b/g, '$1');
-      texto = texto.replace(/([a-z\u00e0-\u00fc,])EM\b/g, '$1');
-      texto = texto.replace(/\bEM([a-z\u00e0-\u00fc])/g, '$1');
-      texto = texto.replace(/\s+EM\s*\n/g, '\n');
-      texto = texto.replace(/\nEM\s+/g, '\n');
-      texto = texto.replace(/\bEM\s+BRANCO\b/gi, ' ');
-      texto = texto.replace(/\bBRANCO\b/g, ' ');
-      texto = texto.replace(/(?<=[a-z\u00e0-\u00fc])\s+EM\s+(?=[a-z\u00e0-\u00fc])/g, ' ');
-      texto = texto.replace(/\s+EM\s*$/gm, '');
-      texto = texto.replace(/[ \t]{3,}/g, ' ');
-      texto = texto.replace(/\n{3,}/g, '\n');
-    } catch(eLimpa) { console.warn('[SASC] limpeza:', eLimpa); }
-
-    var r = DATA[idx] || {};
-
-    // ── Extrai metadados gerais ───────────────────────────────────
-    var meta = _sascExtrairMeta(texto);
-
-    var changed = false;
-    if (meta.empresa   && !r.empresa)   { r.empresa   = meta.empresa;   changed = true; }
-    if (meta.cnpj      && !r.cnpj)      { r.cnpj      = meta.cnpj;      changed = true; }
-    if (meta.municipio && !r.municipio) { r.municipio  = meta.municipio; changed = true; }
-
-    if (meta.numLicenca || meta.validade) {
-      var cnpjKey2 = _empKey(r);
-      if (!LICHI[cnpjKey2]) LICHI[cnpjKey2] = [];
-      var licEntry = LICHI[cnpjKey2].find(function(l) {
-        return l.numLicenca === meta.numLicenca && meta.numLicenca;
-      });
-      if (!licEntry) {
-        LICHI[cnpjKey2].unshift({
-          modalidade:     r.modalidade || '',
-          situacao:       r.situacao   || '',
-          dataEmissao:    meta.dataEmissao    || '',
-          dataVencimento: meta.validade       || r.validade || '',
-          prazoAdequacao: '',
-          numLicenca:     meta.numLicenca     || '',
-          numProcesso:    meta.numProcesso    || '',
-          observacoes:    '',
-          _fromPdf:       true
-        });
-      }
-      if (meta.validade) { r.validade = meta.validade; changed = true; }
-    }
-    if (changed) { DATA[idx] = r; }
-
-    // ── Extrai dados ambientais ───────────────────────────────────
-    var cnpjKey = _empKey(r);
-    if (!ENV[cnpjKey]) ENV[cnpjKey] = { agua: [], efluente: [], residuo: [] };
-    if (!ENV[cnpjKey].agua)     ENV[cnpjKey].agua     = [];
-    if (!ENV[cnpjKey].efluente) ENV[cnpjKey].efluente = [];
-    if (!ENV[cnpjKey].residuo)  ENV[cnpjKey].residuo  = [];
-
-    var ambiental  = _sascExtrairAmbiental(texto);
-    var injections = 0;
-
-    (ambiental.agua || []).forEach(function(a) {
-      var existe = ENV[cnpjKey].agua.some(function(x){ return x.origem===a.origem && x.uso===a.uso; });
-      if (!existe) { ENV[cnpjKey].agua.push(a); injections++; }
-    });
-    (ambiental.efluente || []).forEach(function(e) {
-      var existe = ENV[cnpjKey].efluente.some(function(x){ return x.origem===e.origem && x.tratamento===e.tratamento; });
-      if (!existe) { ENV[cnpjKey].efluente.push(e); injections++; }
-    });
-    (ambiental.residuo || []).forEach(function(res) {
-      var existe = ENV[cnpjKey].residuo.some(function(x){ return x.codIbama===res.codIbama && x.especifico===res.especifico; });
-      if (!existe) { ENV[cnpjKey].residuo.push(res); injections++; }
-    });
-
-    // ── Extração específica IAT (regex validados com PDF real) ────
-    var dadosEsp   = {};
-    var injEsp     = 0;
-    try {
-      dadosEsp = extrairDadosLicencaIAT(texto);
-      injEsp   = aplicarDadosEspecificosNoSila(dadosEsp, cnpjKey, idx);
-      injections += injEsp;
-    } catch(eEsp) { console.warn('[SASC] extrairDadosLicencaIAT:', eEsp); }
-
-    // ── Salva tudo ────────────────────────────────────────────────
-    // Garante que ENV não tem undefined antes de salvar no Firebase
-    try {
-      var envStr = JSON.stringify(ENV[cnpjKey], function(k, v){ return v === undefined ? null : v; });
-      ENV[cnpjKey] = JSON.parse(envStr);
-      localStorage.setItem('sila6_env', JSON.stringify(ENV, function(k,v){ return v===undefined?null:v; }));
-    } catch(eSave) {}
-
-    changes++; save();
-
-    // ── ALERT 3: Resultado da extração ───────────────────────────
-    var condInfo = dadosEsp.condicionantes || {};
-    var tanqInfo = dadosEsp.tanques        || {};
-    var msgAlert = '✅ Leitura concluída com sucesso!\n\n';
-    msgAlert += '📦 Resíduos encontrados: ' + (dadosEsp.residuos ? dadosEsp.residuos.length : 0) + '\n';
-    msgAlert += '💧 Água: ' + (ambiental.agua||[]).length + ' origem(s)\n';
-    msgAlert += '🚰 Efluentes: ' + (ambiental.efluente||[]).length + ' origem(s)\n';
-    msgAlert += '♻️ Resíduos ambientais: ' + (ambiental.residuo||[]).length + '\n';
-    if (tanqInfo.dataInstalacao) msgAlert += '📅 Instalação tanques: ' + tanqInfo.dataInstalacao + ' → Remoção: ' + (tanqInfo.dataRemocaoLimite||'?') + '\n';
-    if (condInfo.estanqueidade)  msgAlert += '🔵 Estanqueidade: ' + condInfo.estanqueidade + '\n';
-    if (condInfo.hidrostatico)   msgAlert += '💧 Hidrostático: ' + condInfo.hidrostatico + '\n';
-    if (condInfo.analiseCSAO)    msgAlert += '🔬 CSAO: ' + condInfo.analiseCSAO + '\n';
-    if (condInfo.analisePoco)    msgAlert += '🚿 Poço: ' + condInfo.analisePoco + '\n';
-    if (meta.numLicenca)         msgAlert += '📋 Licença: ' + meta.numLicenca + '\n';
-    alert(msgAlert);
-
-    var msg = '✅ PDF importado';
-    if (meta.numLicenca) msg += ' — ' + meta.numLicenca;
-    if (injections) msg += ' · ' + injections + ' campos preenchidos';
-    toast(msg, 'success');
-
-    // ── FIX 3: Atualiza DOM e redesenha tabelas imediatamente ─────
-    var activeIdx = DATA.findIndex(function(d){ return d._id === selectedId; });
-    if (activeIdx >= 0) {
-      renderPInfo(activeIdx);   // redesenha aba Processo (inclui card SASC)
-      renderPAmb(activeIdx);    // redesenha aba Ambiental (tabela resíduos)
-      renderPLicencas(activeIdx);
-    }
-    renderCtrl();   // atualiza cards de controle no dashboard
-    renderTable();
-
-  } catch(e) {
-    alert('Erro inesperado na importação: ' + e.message);
-    console.error('[SASC] sascImportarLicenca erro:', e);
-    toast('Erro ao importar PDF: ' + e.message, 'error');
-  }
-}
-
-
+</html>
