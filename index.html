@@ -6607,8 +6607,8 @@ async function _fbAutoInit() {
           _setSyncDot('saving', 'Enviando dados locais…');
           try {
             await cloudSave();
-            const hora = new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
-            _setSyncDot('ok', 'Salvo na nuvem às ' + hora);
+            var horaSalvo = new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+            _setSyncDot('ok', 'Salvo na nuvem às ' + horaSalvo);
           } catch(saveErr) {
             console.error('cloudSave on auto-init failed:', saveErr);
             _setSyncDot('err', 'Falha ao salvar na nuvem');
