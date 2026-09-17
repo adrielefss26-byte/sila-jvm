@@ -3961,59 +3961,55 @@ function _ensurePdfWorker(){
 async function extractIatPdfText(file){
   if(typeof pdfjsLib==='undefined')
     throw new Error('pdf.js não disponível. Verifique sua conexão e recarregue a página.');
-  _ensurePdfWorker(); // síncrono — apenas garante workerSrc se ainda não estiver definido
+  _ensurePdfWorker();
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({data:arrayBuffer}).promise;
   let fullText='';
   for(let p=1;p<=pdf.numPages;p++){
-    const page     = await pdf.getPage(p);
-    const content  = await page.getTextContent();
-    const items    = content.items;
-
-    // Detecta quebras de linha reais pelo eixo Y dos elementos pdf.js
-    // Isso é crítico: sem isso, toda a página vira uma linha só,
-    // e [^\n]* nos filtros de rodapé destrói o texto das condicionantes
+    const page    = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    const items   = content.items;
     if(!items.length){ fullText += '\n'; continue; }
 
-    const Y_DELTA = 3; // diferença mínima em pts para considerar nova linha
-    let lines    = [];
-    let curLine  = '';
-    let lastY    = null;
+    // ── FILTRO PRÉ-AGRUPAMENTO: remove itens "EM BRANCO" antes de agrupar por Y ──
+    // O IAT tem páginas em branco cujo texto ("EM BRANCO") fica no MESMO Y
+    // que o conteúdo real → mistura insolúvel se agruparmos antes de limpar
+    const EB_RE = /^(EM\s*BRANCO|EMBRANCO|EM|BRANCO)$/i;
+    const itemsFiltrados = items.filter(item => {
+      if(!item.str) return false;
+      const s = item.str.trim();
+      if(!s) return false;
+      if(EB_RE.test(s)) return false; // descarta item puro de EM BRANCO
+      return true;
+    });
 
-    for(const item of items){
-      if(!item.str) continue;
+    // Agrupa por Y (Y_DELTA=3) somente com os itens válidos
+    const Y_DELTA = 3;
+    let lines=[], curLine='', lastY=null;
+    for(const item of itemsFiltrados){
       const y = item.transform ? Math.round(item.transform[5]) : null;
-      if(lastY !== null && y !== null && Math.abs(y - lastY) > Y_DELTA){
+      if(lastY!==null && y!==null && Math.abs(y-lastY)>Y_DELTA){
         if(curLine.trim()) lines.push(curLine.trim());
         curLine = item.str;
       } else {
-        curLine += (curLine ? ' ' : '') + item.str;
+        curLine += (curLine?' ':'') + item.str;
       }
-      if(y !== null) lastY = y;
+      if(y!==null) lastY=y;
     }
     if(curLine.trim()) lines.push(curLine.trim());
-
     fullText += lines.join('\n') + '\n\n';
   }
-  // ── FILTRO "EM BRANCO" ─────────────────────────────────────────
-  // Remove todas as ocorrências da marca d'água/fundo do IAT
-  // Cobre: "EM BRANCO", "EM  BRANCO", quebras de linha, unicode nbsp
-  fullText = fullText
-    .replace(/\bEM[\s\u00a0\n\r]+BRANCO\b/gi, '') // variações com espaço/quebra
-    .replace(/EM BRANCO/gi, '')                    // literal direto
-    .replace(/EMBRANCO/gi, '')                     // colado sem espaço
-    .replace(/(\s*EM\s+BRANCO\s*)+/gi, ' ')        // múltiplas repetições seguidas
-    .replace(/[ \t]{2,}/g, ' ')                    // colapsa espaços duplos
-    .replace(/(\n\s*){3,}/g, '\n\n')               // colapsa linhas em branco múltiplas
-    .trim();
 
-  // Verificação extra: se ainda tiver mais de 30% do texto sendo "EM BRANCO", algo deu errado
-  const emBrancoMatches = (fullText.match(/EM\s*BRANCO/gi)||[]).length;
-  const totalWords = fullText.split(/\s+/).length;
-  if(emBrancoMatches / totalWords > 0.1) {
-    // Força remoção agressiva
-    fullText = fullText.replace(/EM\s*BRANCO/gi, '').replace(/[ \t]{2,}/g,' ').trim();
-  }
+  // Limpeza final de resíduos de "EM BRANCO" que possam ter sobrado
+  fullText = fullText
+    .replace(/\bEM[\s\u00a0\n\r]+BRANCO\b/gi, ' ')
+    .replace(/\bEM BRANCO\b/gi, ' ')
+    .replace(/\bEMBRANCO\b/gi, ' ')
+    .replace(/\bEM\b\s*(?=\s|$)/g, '')   // EM isolado
+    .replace(/\bBRANCO\b/g, '')           // BRANCO isolado residual
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/(\n\s*){3,}/g, '\n\n')
+    .trim();
 
   return fullText;
 }
