@@ -9157,19 +9157,9 @@ function extrairDadosLicencaIAT(textoPdf) {
     condicionantes: { estanqueidade: '', hidrostatico: '', analiseCSAO: '', analisePoco: '' }
   };
   try {
-    var t = (textoPdf || '');
-    // Limpeza "EM BRANCO"
-    t = t.replace(/\bEM(\d{6})\b/g, '$1');
-    t = t.replace(/([a-z\u00e0-\u00fc,])EM\b/g, '$1');
-    t = t.replace(/\bEM([a-z\u00e0-\u00fc])/g, '$1');
-    t = t.replace(/\s+EM\s*\n/g, '\n');
-    t = t.replace(/\nEM\s+/g, '\n');
-    t = t.replace(/\bEM\s+BRANCO\b/gi, ' ');
-    t = t.replace(/\bBRANCO\b/g, ' ');
-    t = t.replace(/([a-z\u00e0-\u00fc])\s+EM\s+([a-z\u00e0-\u00fc])/g, '$1 $2');
-    t = t.replace(/\s+EM\s*$/gm, '');
-    t = t.replace(/\s{3,}/g, ' ');
-    t = t.replace(/\n{3,}/g, '\n');
+    // Recebe texto já limpo de "EM BRANCO" por sascImportarLicenca
+    // Faz apenas normalização de espaços residuais
+    var t = (textoPdf || '').replace(/[ \t]{3,}/g, ' ').replace(/\n{3,}/g, '\n');
 
     // ── 1. BLOCO 3.1 — Data de Instalação dos Tanques ───────────────
     var bloco31 = '';
@@ -9177,12 +9167,16 @@ function extrairDadosLicencaIAT(textoPdf) {
       var s31 = t.split(/3\.1\s+TANQUE\s+DE\s+COMBUST[ÍI]VEL/i);
       if (s31.length > 1) bloco31 = s31[1].split(/3\.2\s+[ÁA]GUA/i)[0];
     } catch(e31) {}
-    var datas31 = bloco31.match(/\b(\d{2}\/\d{2}\/\d{4})\b/g);
+
+    // FIX BUG 1: sem \b — captura datas mesmo precedidas de "EM" colado
+    var datas31 = bloco31.match(/(\d{2}\/\d{2}\/\d{4})/g);
     if (datas31 && datas31.length > 0) {
-      var dtStr = datas31[0];
+      var dtStr = datas31[0]; // primeira data = instalação
       var pt    = dtStr.split('/');
-      resultado.tanques.dataInstalacao    = dtStr;
-      resultado.tanques.dataRemocaoLimite = pt[0]+'/'+pt[1]+'/'+(parseInt(pt[2],10)+25);
+      if (pt.length === 3 && pt[2].length === 4) {
+        resultado.tanques.dataInstalacao    = dtStr;
+        resultado.tanques.dataRemocaoLimite = pt[0]+'/'+pt[1]+'/'+(parseInt(pt[2],10)+25);
+      }
     }
 
     // ── 2. BLOCO 3.6 — Resíduos Sólidos ────────────────────────────
@@ -9192,44 +9186,45 @@ function extrairDadosLicencaIAT(textoPdf) {
       if (s36.length > 1) bloco36 = s36[1].split(/Obs\.\s*:|4\.\s*CONDICIONANTES/i)[0];
     } catch(e36) {}
 
-    // Normaliza quebras de linha: une linhas de continuação ao item anterior
-    // (cada item começa com 6 dígitos — linhas sem 6 dígitos são continuação)
+    // Normaliza quebras: une linhas de continuação ao item de 6 dígitos
     var linhas36 = bloco36.split('\n');
-    var itensNorm = [];
-    var itemAtual = '';
+    var itensNorm36 = [];
+    var itemAtual36 = '';
     for (var li = 0; li < linhas36.length; li++) {
-      var l = linhas36[li].trim();
-      if (!l) continue;
-      if (/^\d{6}\b/.test(l)) {
-        if (itemAtual) itensNorm.push(itemAtual);
-        itemAtual = l;
-      } else {
-        if (itemAtual) itemAtual = itemAtual + ' ' + l;
+      var l36 = linhas36[li].trim();
+      if (!l36) continue;
+      if (/^\d{6}\b/.test(l36)) {
+        if (itemAtual36) itensNorm36.push(itemAtual36);
+        itemAtual36 = l36;
+      } else if (itemAtual36) {
+        itemAtual36 = itemAtual36 + ' ' + l36;
       }
     }
-    if (itemAtual) itensNorm.push(itemAtual);
-    var blocoNorm = itensNorm.join('\n');
+    if (itemAtual36) itensNorm36.push(itemAtual36);
 
-    // Regex flexível: hífen OPCIONAL entre código e descrição
-    var regexRes = /\b(\d{6})\b\s*[-–]?\s*([A-Za-z\u00c0-\u00ff][^0-9\n]+?)\s+([\d,]+)\s*(kg|unid|l\b|litros|m[³3]|t)\s+([A-Za-z\u00c0-\u00ff][^\n\d]*?)(?=\s*\d{6}|\s*$)/gi;
-    var mRes;
-    while ((mRes = regexRes.exec(blocoNorm)) !== null) {
+    // FIX BUG 2: processa cada item normalizado individualmente
+    // Regex simples por linha — sem lookahead que pode falhar em JS com /gi
+    var rxItem = /^(\d{6})\s*[-–]?\s*(.+?)\s+([\d,]+)\s*(kg|unid|l|litros|m[³3]|t)\s+(.+)$/i;
+    for (var ii = 0; ii < itensNorm36.length; ii++) {
       try {
-        var desc = (mRes[2]||'').trim().replace(/^[-–]\s*/,'').replace(/\s+/g,' ');
-        var dest = (mRes[5]||'').trim().replace(/\s+/g,' ').replace(/[.,;]+$/,'').replace(/\s*(EM|BRANCO)\s*$/i,'');
+        var item = itensNorm36[ii].trim().replace(/\s+/g, ' ');
+        var mItem = item.match(rxItem);
+        if (!mItem) continue;
+        var desc = mItem[2].trim().replace(/^[-–]\s*/, '');
+        var dest = mItem[5].trim().replace(/[.,;]+$/, '').replace(/\s*(EM|BRANCO)\s*$/i, '');
         if (desc.length < 2 || /descri[çc][aã]o/i.test(desc)) continue;
         resultado.residuos.push({
-          codIbama:       mRes[1].trim(),
+          codIbama:       mItem[1].trim(),
           residuoIbama:   desc,
           especifico:     desc,
-          quantidade:     mRes[3].trim().replace(',','.'),
-          unidade:        (mRes[4]||'kg').trim().toLowerCase(),
+          quantidade:     mItem[3].trim().replace(',', '.'),
+          unidade:        mItem[4].trim().toLowerCase(),
           destino:        dest,
           destinoEmpresa: dest,
           coletora:'', cnpjColetora:'', transportadora:'',
           cnpjTransp:'', cnpjDestino:'', intermediaria:'', cnpjInterm:''
         });
-      } catch(eLn) {}
+      } catch(eItem) {}
     }
 
     // ── 3. BLOCO 4 — Condicionantes ─────────────────────────────────
@@ -9239,29 +9234,33 @@ function extrairDadosLicencaIAT(textoPdf) {
       if (s4.length > 1) blocoC = s4[1];
     } catch(e4) {}
 
-    if (/estanqueidade[\s\S]{0,250}(?:A\s+CADA\s+DOIS\s+ANOS|BIENAL)/i.test(blocoC) ||
+    // Estanqueidade (Cond. 7: "A CADA DOIS ANOS")
+    if (/estanqueidade[\s\S]{0,300}(?:A\s+CADA\s+DOIS\s+ANOS|BIENAL)/i.test(blocoC) ||
         /(?:A\s+CADA\s+DOIS\s+ANOS)[\s\S]{0,100}estanqueidade/i.test(blocoC)) {
       resultado.condicionantes.estanqueidade = 'bienal';
-    } else if (/estanqueidade[\s\S]{0,120}(?:ANUAL|ANUALMENTE)/i.test(blocoC)) {
+    } else if (/estanqueidade[\s\S]{0,150}(?:ANUAL|ANUALMENTE)/i.test(blocoC)) {
       resultado.condicionantes.estanqueidade = 'anual';
-    } else if (/estanqueidade[\s\S]{0,120}SEMESTRAL/i.test(blocoC)) {
+    } else if (/estanqueidade[\s\S]{0,150}SEMESTRAL/i.test(blocoC)) {
       resultado.condicionantes.estanqueidade = 'semestral';
     }
 
-    if (/hidrost[áa]tico[\s\S]{0,120}(?:ANUAL|ANUALMENTE)/i.test(blocoC) ||
-        /ANUALMENTE[\s\S]{0,80}hidrost[áa]tico/i.test(blocoC)) {
+    // Hidrostático (Cond. 8: "ANUALMENTE")
+    if (/hidrost[áa]tico[\s\S]{0,150}(?:ANUAL|ANUALMENTE)/i.test(blocoC) ||
+        /ANUALMENTE[\s\S]{0,100}hidrost[áa]tico/i.test(blocoC)) {
       resultado.condicionantes.hidrostatico = 'anual';
-    } else if (/hidrost[áa]tico[\s\S]{0,120}(?:A\s+CADA\s+DOIS\s+ANOS|BIENAL)/i.test(blocoC)) {
+    } else if (/hidrost[áa]tico[\s\S]{0,150}(?:A\s+CADA\s+DOIS\s+ANOS|BIENAL)/i.test(blocoC)) {
       resultado.condicionantes.hidrostatico = 'bienal';
     }
 
-    if (/(?:CSAO|caixa\s+separadora[\s\S]{0,30}[áa]gua[\s\S]{0,10}[óo]leo)[\s\S]{0,120}SEMESTRAL/i.test(blocoC) ||
-        /SEMESTRAL[\s\S]{0,80}(?:CSAO|caixa\s+separadora)/i.test(blocoC)) {
+    // CSAO (Cond. 5: "CSAO … SEMESTRAL")
+    if (/(?:CSAO|caixa\s+separadora[\s\S]{0,30}[áa]gua[\s\S]{0,10}[óo]leo)[\s\S]{0,150}SEMESTRAL/i.test(blocoC) ||
+        /SEMESTRAL[\s\S]{0,100}(?:CSAO|caixa\s+separadora)/i.test(blocoC)) {
       resultado.condicionantes.analiseCSAO = 'semestral';
     }
 
-    if (/po[çc]o[\s\S]{0,250}SEMESTRAL/i.test(blocoC) ||
-        /qualidade\s+da\s+[áa]gua[\s\S]{0,120}SEMESTRAL/i.test(blocoC)) {
+    // Poço (Cond. 6: "poço tubular … SEMESTRAL")
+    if (/po[çc]o[\s\S]{0,300}SEMESTRAL/i.test(blocoC) ||
+        /qualidade\s+da\s+[áa]gua[\s\S]{0,150}SEMESTRAL/i.test(blocoC)) {
       resultado.condicionantes.analisePoco = 'semestral';
     }
 
