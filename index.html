@@ -2855,7 +2855,7 @@ function openPanel(idx){
       var panelHdr = document.querySelector('#sidePanel .panel-hdr');
       if (panelHdr && panelHdr.parentNode) panelHdr.parentNode.insertBefore(_bar, panelHdr.nextSibling);
     }
-    if (_bar) _bar.style.display = _isPosto(r) ? 'block' : 'none';
+    if (_bar) _bar.style.display = 'block'; // aparece para todos os tipos
   } catch(e) { console.warn('[SASC] upload bar:', e); }
 }
 function closePanel(){selectedId=null;document.getElementById('sidePanel').classList.add('hidden');renderTable();}
@@ -2939,6 +2939,24 @@ function renderPInfo(idx){
       ${r.motivo?`<div class="ii" style="grid-column:1/-1"><div class="il">Obs.</div><div class="iv" style="font-size:11px;color:var(--text2)">${r.motivo}</div></div>`:''}
     </div></div>
     ${tot>0?`<div><div class="ps-title">Pendências recentes</div>${p.pendencias.slice(0,4).map((pd,i)=>`<div style="display:flex;align-items:flex-start;gap:6px;padding:6px 8px;background:var(--s2);border-radius:6px;margin-bottom:4px"><span style="font-family:var(--mono);font-size:9px;color:var(--text4);flex-shrink:0;margin-top:1px">${i+1}</span><span style="flex:1;font-size:10px;line-height:1.3;color:var(--text2)">${pd.documento.substring(0,85)}${pd.documento.length>85?'…':''}</span><span class="badge ${pd.status==='Concluído'?'b-def':pd.status==='Pendente'?'b-adeq':'b-agu'}" style="flex-shrink:0">${pd.status}</span></div>`).join('')}${tot>4?`<button class="btn btn-ghost btn-sm" onclick="switchTab('pend')" style="width:100%;margin-top:4px">Ver todas (${tot}) →</button>`:''}</div>`:''}
+    ${(function() {
+      // ── Card Dados da Licença (universal — todos os tipos) ──────
+      try {
+        var key = _empKey(r);
+        var ld = (LICHI[key] && LICHI[key][0] && LICHI[key][0].licencaDados) ? LICHI[key][0].licencaDados : null;
+        if (!ld || (!ld.atividadePrincipal && !ld.logradouro && !ld.bairro && !ld.coordenadasUtm)) return '';
+        var rows = '';
+        if (ld.atividadePrincipal)  rows += '<div class="ii" style="grid-column:1/-1"><div class="il">Atividade Principal</div><div class="iv">'  + ld.atividadePrincipal  + '</div></div>';
+        if (ld.atividadeEspecifica) rows += '<div class="ii" style="grid-column:1/-1"><div class="il">Atividade Específica</div><div class="iv">' + ld.atividadeEspecifica + '</div></div>';
+        if (ld.porte || ld.potenciaInstalada) rows += (ld.porte ? '<div class="ii"><div class="il">Porte</div><div class="iv">' + ld.porte + '</div></div>' : '') + (ld.potenciaInstalada ? '<div class="ii"><div class="il">Potência Instalada</div><div class="iv">' + ld.potenciaInstalada + '</div></div>' : '');
+        if (ld.logradouro)          rows += '<div class="ii" style="grid-column:1/-1"><div class="il">Logradouro</div><div class="iv">'            + ld.logradouro          + '</div></div>';
+        if (ld.bairro || ld.municipioUf) rows += (ld.bairro ? '<div class="ii"><div class="il">Bairro</div><div class="iv">' + ld.bairro + '</div></div>' : '') + (ld.municipioUf ? '<div class="ii"><div class="il">Município/UF</div><div class="iv">' + ld.municipioUf + '</div></div>' : '');
+        if (ld.cep || ld.baciaHidrografica) rows += (ld.cep ? '<div class="ii"><div class="il">CEP</div><div class="iv mono">' + ld.cep + '</div></div>' : '') + (ld.baciaHidrografica ? '<div class="ii"><div class="il">Bacia Hidrográfica</div><div class="iv">' + ld.baciaHidrografica + '</div></div>' : '');
+        if (ld.coordenadasUtm)      rows += '<div class="ii" style="grid-column:1/-1"><div class="il">Coordenadas UTM</div><div class="iv mono">' + ld.coordenadasUtm + '</div></div>';
+        if (!rows) return '';
+        return '<div style="margin-bottom:13px;border:1px solid var(--border);border-radius:7px;overflow:hidden"><div style="background:rgba(103,232,249,.08);padding:5px 10px;font-size:10px;font-weight:700;color:var(--cyan);text-transform:uppercase;letter-spacing:.06em">📋 Dados da Licença IAT</div><div class="info-grid" style="padding:8px 10px">' + rows + '</div></div>';
+      } catch(eLd) { return ''; }
+    })()}
     ${_prazosHTML(_empKey(r),idx)}
     ${_renderSascBlock(r)}
     <div style="display:flex;gap:7px;margin-top:10px"><button class="btn btn-ghost btn-sm" style="flex:1" onclick="switchTab('pend')">📎 Pendências</button><button class="btn btn-ghost btn-sm" style="flex:1" onclick="switchTab('edit')">✎ Editar</button></div>`;
@@ -9549,46 +9567,87 @@ function _sascExtrairMeta(texto) {
   try {
     var t = texto || '';
 
-    // Razão Social
-    var mEmp = t.match(/(?:Raz[aã]o\s+Social|Nome\s+(?:do\s+)?Empreendedor)[:\s]+([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ][^\n]{3,80})/i);
-    if (mEmp) meta.empresa = mEmp[1].trim().replace(/\s+/g, ' ');
+    // ── Seção 1: Identificação do Empreendedor ────────────────────
+    var mEmp = t.match(/Nome[\/\\]?Raz[aã]o\s+Social[:\s]+([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ][^\n]{3,80})/i);
+    if (!mEmp) mEmp = t.match(/Raz[aã]o\s+Social[:\s]+([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ][^\n]{3,80})/i);
+    if (mEmp) meta.empresa = mEmp[1].trim().replace(/\s+/g,' ');
 
-    // CNPJ
     var mCnpj = t.match(/CNPJ[:\s]+(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})/i);
-    if (mCnpj) meta.cnpj = mCnpj[1].replace(/[^\d./\-]/g, '');
+    if (mCnpj) meta.cnpj = mCnpj[1];
 
-    // Município
-    var mMun = t.match(/Munic[ií]pio[:\s]+([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ][^\n,]{2,40})/i);
-    if (!mMun) mMun = t.match(/([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ][a-záéíóúàâêôãõç\s]{3,30})\s*[-,]\s*PR\b/);
-    if (mMun) meta.municipio = mMun[1].trim();
-
-    // Número da licença
-    var mNum = t.match(/(?:N[uú]mero|N[oº]\.?)\s*(?:da\s+)?(?:[Ll]icen[çc]a|LO|LP|LI|RLO)\s*[:\-]?\s*(\d+)/i);
+    // Número da licença e documento
+    var mNum = t.match(/N[uú]mero\s+do\s+Documento[:\s]+([A-Z0-9\-]+)/i);
     if (!mNum) mNum = t.match(/(?:LO|LP|LI|RLO|DLAM|DLAE)\s*n[oº]?\s*[:\-]?\s*(\d+)/i);
-    if (mNum) meta.numLicenca = mNum[1];
+    if (mNum) meta.numLicenca = mNum[1].trim();
 
-    // Número do processo
-    var mProc = t.match(/[Pp]rocesso\s*[:\-]?\s*(\d[\d.\-/]+)/);
-    if (mProc) meta.numProcesso = mProc[1];
+    var mProto = t.match(/N[uú]mero\s+do\s+Protocolo[:\s]+([\d.\-\/]+)/i);
+    if (mProto) meta.numProcesso = mProto[1].trim();
 
-    // Validade
-    var mVal = t.match(/[Vv]alidade\s+(?:da\s+[Ll]icen[çc]a\s*)?[:\-]?\s*(\d{2}\/\d{2}\/\d{4})/);
+    var mVal = t.match(/Validade\s+da\s+Licen[çc]a[:\s]+(\d{2}\/\d{2}\/\d{4})/i);
     if (!mVal) mVal = t.match(/v[aá]lida\s+at[eé]\s+(\d{2}\/\d{2}\/\d{4})/i);
     if (mVal) {
       var p = mVal[1].split('/');
-      meta.validade = p[2] + '-' + p[1].padStart(2,'0') + '-' + p[0].padStart(2,'0');
+      meta.validade = p[2]+'-'+p[1].padStart(2,'0')+'-'+p[0].padStart(2,'0');
     }
 
-    // Data de Emissão
     var mEmis = t.match(/[Ee]miss[aã]o[:\s]+(\d{2}\/\d{2}\/\d{4})/);
-    if (!mEmis) mEmis = t.match(/[Ee]mitida?\s+em[:\s]+(\d{2}\/\d{2}\/\d{4})/i);
     if (mEmis) {
       var pe = mEmis[1].split('/');
-      meta.dataEmissao = pe[2] + '-' + pe[1].padStart(2,'0') + '-' + pe[0].padStart(2,'0');
+      meta.dataEmissao = pe[2]+'-'+pe[1].padStart(2,'0')+'-'+pe[0].padStart(2,'0');
     }
+
+    // ── Seção 2: Identificação do Empreendimento ──────────────────
+    // Atividade Principal (linha após "Atividade")
+    var mAtiv = t.match(/\bAtividade\b[:\s]*\n?\s*([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ][^\n]{5,120})/i);
+    if (mAtiv) meta.atividadePrincipal = mAtiv[1].trim().replace(/\s+/g,' ');
+
+    // Potência Instalada
+    var mPot = t.match(/Pot[eê]ncia\s+Instalada[:\s]+([^\n]{1,40})/i);
+    if (mPot) meta.potenciaInstalada = mPot[1].trim().replace(/\s+/g,' ');
+
+    // Porte
+    var mPorte = t.match(/\bPorte[:\s]+([^\n]{1,30})/i);
+    if (mPorte) meta.porte = mPorte[1].trim().replace(/\s+/g,' ');
+
+    // Atividade Específica (linha após "Atividade Específica")
+    var mAtvEsp = t.match(/Atividade\s+Espec[íi]fica[:\s]*\n?\s*([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ0-9][^\n]{5,200})/i);
+    if (mAtvEsp) meta.atividadeEspecifica = mAtvEsp[1].trim().replace(/\s+/g,' ');
+
+    // Coordenadas UTM
+    var mUtm = t.match(/Coordenadas\s+UTM[^:\n]*[:\s]+([\d\s.,\-]+)/i);
+    if (mUtm) meta.coordenadasUtm = mUtm[1].trim().replace(/\s+/g,' ');
+
+    // Logradouro e Número
+    var mLog = t.match(/Logradouro\s+e\s+N[uú]mero[:\s]*\n?\s*([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ][^\n]{5,120})/i);
+    if (mLog) meta.logradouro = mLog[1].trim().replace(/\s+/g,' ');
+
+    // Bacia Hidrográfica
+    var mBacia = t.match(/Bacia\s+Hidrogr[áa]fica[:\s]+([^\n]{3,50})/i);
+    if (mBacia) meta.baciaHidrografica = mBacia[1].trim().replace(/\s+/g,' ');
+
+    // Bairro
+    var mBairro = t.match(/Bairro[:\s]+([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ][^\n]{2,40})/i);
+    if (mBairro) meta.bairro = mBairro[1].trim().replace(/\s+/g,' ');
+
+    // Município / UF (Ex: "Nova Londrina/PR")
+    var mMunUf = t.match(/Munic[íi]pio\s*[\/\\]?\s*UF[:\s]+([^\n]{3,50})/i);
+    if (mMunUf) {
+      meta.municipioUf = mMunUf[1].trim().replace(/\s+/g,' ');
+      var parteMun = meta.municipioUf.split(/[\/,]/)[0].trim();
+      if (parteMun) meta.municipio = parteMun;
+    } else {
+      var mMun = t.match(/Munic[íi]pio[:\s]+([A-ZÁÉÍÓÚÀÂÊÔÃÕÇ][^\n,]{2,40})/i);
+      if (mMun) meta.municipio = mMun[1].trim();
+    }
+
+    // CEP
+    var mCep = t.match(/CEP[:\s]+([\d]{2}\.?[\d]{3}-[\d]{3}|[\d]{8})/i);
+    if (mCep) meta.cep = mCep[1].trim();
+
   } catch(e) { console.warn('[SASC] _sascExtrairMeta:', e); }
   return meta;
 }
+
 
 // ── Extrai dados ambientais (água, efluente, resíduo) ─────────────
 function _sascExtrairAmbiental(texto) {
@@ -10297,6 +10356,44 @@ async function sascImportarLicenca(file, idx) {
       if (meta.validade) { r.validade = meta.validade; changed = true; }
     }
     if (changed) { DATA[idx] = r; }
+
+    // ── Salva licencaDados em LICHI (universal — funciona para todos os tipos) ──
+    try {
+      var cnpjKeyL = _empKey(r);
+      if (!LICHI[cnpjKeyL]) LICHI[cnpjKeyL] = [];
+      // Objeto licencaDados com todos os campos da Seção 2
+      var licDados = {
+        atividadePrincipal:  meta.atividadePrincipal  || '',
+        potenciaInstalada:   meta.potenciaInstalada    || '',
+        porte:               meta.porte                || '',
+        atividadeEspecifica: meta.atividadeEspecifica  || '',
+        coordenadasUtm:      meta.coordenadasUtm       || '',
+        logradouro:          meta.logradouro           || '',
+        baciaHidrografica:   meta.baciaHidrografica    || '',
+        bairro:              meta.bairro               || '',
+        municipioUf:         meta.municipioUf          || '',
+        cep:                 meta.cep                  || '',
+        _atualizadoEm:       new Date().toISOString()
+      };
+      // Injeta ou atualiza no primeiro registro LICHI (o mais recente)
+      if (LICHI[cnpjKeyL].length > 0) {
+        LICHI[cnpjKeyL][0].licencaDados = licDados;
+      } else {
+        LICHI[cnpjKeyL].unshift({
+          modalidade:     r.modalidade || '',
+          situacao:       r.situacao   || '',
+          dataEmissao:    meta.dataEmissao    || '',
+          dataVencimento: meta.validade       || r.validade || '',
+          prazoAdequacao: '',
+          numLicenca:     meta.numLicenca     || '',
+          numProcesso:    meta.numProcesso    || '',
+          observacoes:    '',
+          licencaDados:   licDados,
+          _fromPdf:       true
+        });
+      }
+      localStorage.setItem('sila6_lichi', JSON.stringify(LICHI));
+    } catch(eLic) { console.warn('[SASC] salvar licencaDados:', eLic); }
 
     // ── Extrai dados ambientais ───────────────────────────────────
     var cnpjKey = _empKey(r);
