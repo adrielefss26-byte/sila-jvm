@@ -2333,7 +2333,8 @@ function baixarHtmlComDados(){
   var snapshot = {
     processos: DATA, pendencias: PENDS, historico: HIST, ambiental: ENV,
     condicionantes: COND, controles: CTRL, statusColors: statusColors,
-    activityCards: activityCards, comp: COMP, prazo: PRAZO, lichi: LICHI
+    activityCards: activityCards, comp: COMP, prazo: PRAZO, lichi: LICHI,
+    _savedTs: Date.now()
   };
 
   // Script que pré-carrega localStorage ao abrir o arquivo no navegador
@@ -2355,8 +2356,10 @@ function baixarHtmlComDados(){
     '    localStorage.setItem("sila6_lichi",   JSON.stringify(snap.lichi||{}));\n' +
     '    if(snap.statusColors)  localStorage.setItem("sila6_scols",  JSON.stringify(snap.statusColors));\n' +
     '    if(snap.activityCards) localStorage.setItem("sila6_acards", JSON.stringify(snap.activityCards));\n' +
-    '    // sila6_lastSave não definido no snapshot — Firebase decide qual dado é mais recente\n' +
-    '    console.log("[SILA] Snapshot carregado: "+snap.processos.length+" processos.");\n' +
+    '    var snapTs = snap._savedTs || Date.now();\n' +
+    '    localStorage.setItem("sila6_lastSave", String(snapTs));\n' +
+    '    localStorage.setItem("sila6_snapVersion", String(snap.processos.length));\n' +
+    '    console.log("[SILA] Snapshot carregado: "+snap.processos.length+" processos, ts="+snapTs);\n' +
     '  }catch(e){console.warn("[SILA] Erro snapshot:",e);}\n' +
     '})();\n' +
     '<\/script>';
@@ -5909,14 +5912,20 @@ function _fbAutoInit() {
         // Timestamp do localStorage (gravado por save())
         const localTs = window._silaLastSaveTs || 0;
 
-        // Firebase é a fonte de verdade: sempre aplica dados da nuvem se existirem.
-        // Exceção: só mantém local se o save local foi feito DEPOIS do save na nuvem
-        // e dentro desta mesma sessão (evita sobrescrever edições em andamento).
+        // ── Decidir qual fonte usar: nuvem ou local ──
+        // Critério 1: local tem MAIS processos que a nuvem → local é mais completo → usar local
+        // Critério 2: local foi salvo DEPOIS da nuvem nesta sessão → usar local
+        // Critério 3 (fallback): nuvem tem dados e local não é mais recente → usar nuvem
         const GRACE_MS = 60000; // 1 min de tolerância
         const localSavedThisSession = window._silaHasSavedThisSession === true;
-        const cloudIsNewer = cloudTs > 0 && (!localSavedThisSession || (cloudTs + GRACE_MS) >= localTs);
-        if (cloudIsNewer) {
-          // ── Nuvem é mais recente (ou igual dentro da margem) → aplica dados da nuvem ──
+        const cloudProcessCount = (cloudData.processos || []).length;
+        const localProcessCount = DATA.length || parseInt(localStorage.getItem('sila6_snapVersion') || '0');
+        const localHasMoreData = localProcessCount > cloudProcessCount;
+        const localIsNewerByTime = localSavedThisSession && localTs > 0 && localTs > (cloudTs + GRACE_MS);
+        const useLocal = localHasMoreData || localIsNewerByTime;
+
+        if (!useLocal) {
+          // ── Nuvem tem dados adequados → aplica dados da nuvem ──
           const applyOk = _applyCloudData(cloudData);
           if (applyOk) {
             populateDropdowns(); renderAllCards(); renderDash(); renderCtrl();
@@ -5926,12 +5935,16 @@ function _fbAutoInit() {
           _setSyncDot('ok', 'Salvo na nuvem às ' + (ts ? ts.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '—'));
           toast('☁️ Dados sincronizados da nuvem!', 'success');
         } else {
-          // ── Local é mais recente → envia dados locais para a nuvem ──
+          // ── Local tem dados mais completos/recentes → envia para a nuvem ──
+          if (localHasMoreData) {
+            console.log('[SILA] Local (' + localProcessCount + ' proc.) > nuvem (' + cloudProcessCount + ' proc.) — enviando dados locais para nuvem.');
+          }
           _setSyncDot('saving', 'Enviando dados locais…');
           try {
             await cloudSave();
             const hora = new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
             _setSyncDot('ok', 'Salvo na nuvem às ' + hora);
+            toast('☁️ Dados locais enviados para a nuvem!', 'success');
           } catch(saveErr) {
             console.error('cloudSave on auto-init failed:', saveErr);
             _setSyncDot('err', 'Falha ao salvar na nuvem');
